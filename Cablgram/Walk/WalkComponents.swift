@@ -1,86 +1,7 @@
 import SwiftUI
 
-struct WalkView: View {
-    @EnvironmentObject private var steps: StepStore
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var justClaimed: Reward?
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                StepsHero()
-                    .padding(.top, 12)
-
-                if steps.access == .unavailable {
-                    Label("Step counting needs Apple Health, which isn't available on this device.",
-                          systemImage: "exclamationmark.triangle.fill")
-                        .font(.subheadline)
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .card()
-                }
-
-                Text("Rewards")
-                    .font(.title3.bold())
-                    .padding(.top, 4)
-
-                VStack(spacing: 12) {
-                    ForEach(Reward.all) { reward in
-                        RewardCard(reward: reward) {
-                            steps.claim(reward)
-                            justClaimed = reward
-                        }
-                    }
-                }
-
-                Text("Steps count from \(steps.joinDate.formatted(date: .abbreviated, time: .omitted)), when you joined.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                #if DEBUG
-                debugTools
-                #endif
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 24)
-        }
-        .background(Color(.systemGroupedBackground))
-        .refreshable { await steps.refresh() }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await steps.refresh() } }
-        }
-        .alert(item: $justClaimed) { reward in
-            Alert(
-                title: Text("You earned it! 🎉"),
-                message: Text("\(reward.fullName) is yours. You walked \(reward.steps.formatted()) steps for it."),
-                dismissButton: .default(Text("Nice"))
-            )
-        }
-    }
-
-    #if DEBUG
-    private var debugTools: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Testing (debug builds only)")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-            HStack {
-                Button("+1,000") { steps.addTestSteps(1_000) }
-                Button("+10,000") { steps.addTestSteps(10_000) }
-                Spacer()
-                Button("Reset", role: .destructive) { steps.resetTestProgress() }
-            }
-            .buttonStyle(.bordered)
-        }
-        .padding(14)
-        .card()
-    }
-    #endif
-}
-
 /// Gradient card with the step ring and today's numbers.
-private struct StepsHero: View {
+struct StepsHero: View {
     @EnvironmentObject private var steps: StepStore
 
     private var progress: Double {
@@ -154,7 +75,7 @@ private struct StatPill: View {
     }
 }
 
-private struct RewardCard: View {
+struct RewardCard: View {
     @EnvironmentObject private var steps: StepStore
     let reward: Reward
     let onClaim: () -> Void
@@ -204,7 +125,10 @@ private struct RewardCard: View {
                     .font(.caption.bold())
                     .foregroundStyle(.green)
             } else if unlocked {
-                Button(action: onClaim) {
+                Button {
+                    Haptics.celebrate()
+                    onClaim()
+                } label: {
                     Text("Claim")
                         .font(.subheadline.bold())
                         .foregroundStyle(.white)
@@ -221,8 +145,4 @@ private struct RewardCard: View {
         .padding(12)
         .card()
     }
-}
-
-#Preview {
-    WalkView().environmentObject(StepStore())
 }

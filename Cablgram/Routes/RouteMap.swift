@@ -7,14 +7,24 @@ struct RouteMap: View {
     let places: [SavedPlace]
     let walk: WalkSuggestion?
     /// Height covered by the bottom panel, so routes are framed above it.
-    let bottomInset: CGFloat
+    var bottomInset: CGFloat = 0
+    /// Height covered by floating controls at the top.
+    var topInset: CGFloat = 60
+    /// False for the small preview on the Walk page: no panning or buttons,
+    /// and taps pass through to whatever contains the map.
+    var interactive = true
 
     var body: some View {
-        if GoogleMapsConfig.isEnabled {
-            GoogleRouteMap(places: places, walk: walk, bottomInset: bottomInset)
-        } else {
-            AppleRouteMap(places: places, walk: walk, bottomInset: bottomInset)
+        Group {
+            if GoogleMapsConfig.isEnabled {
+                GoogleRouteMap(places: places, walk: walk, bottomInset: bottomInset,
+                               topInset: topInset, interactive: interactive)
+            } else {
+                AppleRouteMap(places: places, walk: walk, bottomInset: bottomInset,
+                              topInset: topInset, interactive: interactive)
+            }
         }
+        .allowsHitTesting(interactive)
     }
 }
 
@@ -40,6 +50,8 @@ private struct AppleRouteMap: View {
     let places: [SavedPlace]
     let walk: WalkSuggestion?
     let bottomInset: CGFloat
+    let topInset: CGFloat
+    let interactive: Bool
 
     /// `.automatic` frames every pin (and you), so the first view shows all your places.
     @State private var camera: MapCameraPosition = .automatic
@@ -61,7 +73,7 @@ private struct AppleRouteMap: View {
             }
         }
         .safeAreaPadding(.bottom, bottomInset)
-        .safeAreaPadding(.top, 60)
+        .safeAreaPadding(.top, topInset)
         .onChange(of: walk?.id) { _, _ in fit() }
         .onChange(of: places) { _, _ in fit() }
     }
@@ -81,6 +93,8 @@ private struct GoogleRouteMap: UIViewRepresentable {
     let places: [SavedPlace]
     let walk: WalkSuggestion?
     let bottomInset: CGFloat
+    let topInset: CGFloat
+    let interactive: Bool
 
     @Environment(\.displayScale) private var displayScale
 
@@ -98,13 +112,14 @@ private struct GoogleRouteMap: UIViewRepresentable {
         options.camera = GMSCameraPosition(latitude: 23.75, longitude: 90.39, zoom: 13)
         let map = GMSMapView(options: options)
         map.isMyLocationEnabled = true
-        map.settings.myLocationButton = true
-        map.settings.compassButton = true
+        map.settings.myLocationButton = interactive
+        map.settings.compassButton = interactive
+        map.settings.setAllGesturesEnabled(interactive)
         return map
     }
 
     func updateUIView(_ map: GMSMapView, context: Context) {
-        map.padding = UIEdgeInsets(top: 60, left: 0, bottom: bottomInset, right: 0)
+        map.padding = UIEdgeInsets(top: topInset, left: 0, bottom: bottomInset, right: 0)
         map.clear()
 
         for place in places {

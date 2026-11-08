@@ -6,6 +6,8 @@ struct MenuView: View {
     @EnvironmentObject private var steps: StepStore
     @EnvironmentObject private var leaderboard: LeaderboardStore
 
+    @AppStorage(Haptics.enabledKey) private var hapticsOn = true
+
     private var claimed: [Reward] { Reward.all.filter(steps.isClaimed) }
 
     var body: some View {
@@ -49,7 +51,19 @@ struct MenuView: View {
                     .card()
                 }
 
+                Toggle(isOn: $hapticsOn) {
+                    Label("Haptics", systemImage: "iphone.radiowaves.left.and.right")
+                        .font(.headline)
+                }
+                .tint(.brand)
+                .padding(16)
+                .card(cornerRadius: 16)
+                .onChange(of: hapticsOn) { _, on in
+                    if on { Haptics.success() }
+                }
+
                 Button(role: .destructive) {
+                    Haptics.warning()
                     leaderboard.stopListening()
                     auth.signOut()
                 } label: {

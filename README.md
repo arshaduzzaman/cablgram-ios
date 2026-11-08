@@ -3,11 +3,10 @@
 SwiftUI app. Everyone signs in with Google first. The layout follows the Facebook app: a "cablgram" bar on top, icon tabs under it.
 
 - **News** (home icon): the Cablgram post feed from `https://www.cablgram.com/api/facebook-posts`, the same one the website shows. Pull to refresh, scroll for more, tap to open, or share.
-- **Walk**: everything about walking, in three sections:
-  - **Rewards**: steps from Apple Health since you joined unlock Liberty Pizza Slice and Uncle Bobo's Chicken (10,000), Smashed Chicken Burger (15,000), GTA 6 (75,000) and PlayStation 5 (100,000). Edit the list in `Cablgram/Walk/Rewards.swift`.
-  - **Routes**: map of your home and usual places, with walks that reach your daily goal.
-  - **Leaderboard**: everyone's steps, all time and today, live from Firestore.
-- **Menu**: your profile, stats, claimed rewards and sign out.
+- **Walk**: everything about walking on one scrolling page: your steps, a daily goal, walk ideas (a map preview plus swipeable walks between your usual places, with a full-screen map), a leaderboard preview with "See all", and rewards. Liberty Pizza Slice and Uncle Bobo's Chicken (10,000), Smashed Chicken Burger (15,000), GTA 6 (75,000) and PlayStation 5 (100,000). Edit the list in `Cablgram/Walk/Rewards.swift`.
+- **Menu**: your profile, stats, claimed rewards, a Haptics switch and sign out.
+
+Haptic feedback (`Cablgram/Shared/Haptics.swift`) plays on taps, selections and tab changes, and a celebration buzz plays when you claim or unlock a reward, reach your daily goal, or move up the leaderboard.
 
 ## Reward photos
 
@@ -32,7 +31,7 @@ The app uses the same Firebase project as the website (`cablgram-6808a`).
 3. Authentication → Sign-in method → enable **Google**.
 4. Firestore → Rules: add the `walkers` block from `firestore.rules` to your existing rules. Don't replace them; the website uses the same database.
 
-Without `GoogleService-Info.plist`, debug builds show a "Skip for now" button so you can still test.
+Without `GoogleService-Info.plist`, debug builds show a "Skip for now" button so you can still test. Debug builds also accept a `-skipSignIn` launch argument for checking screens in the Simulator.
 
 Steps are sent from the phone, so a determined cheater could fake them. The rules cap the numbers, but real prize payouts need a server-side check first.
 

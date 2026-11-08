@@ -40,16 +40,22 @@ struct MainView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TopBar(onProfile: { tab = .menu })
+            TopBar(onProfile: {
+                Haptics.tap()
+                tab = .menu
+            })
             TabStrip(selection: $tab)
             Divider()
 
             // All pages stay alive so switching tabs keeps scroll position and map state.
             ZStack {
-                NewsView(openWalk: { tab = .walk })
+                NewsView(openWalk: {
+                    Haptics.select()
+                    tab = .walk
+                })
                     .opacity(tab == .news ? 1 : 0)
                     .allowsHitTesting(tab == .news)
-                WalkHub()
+                WalkPage(isVisible: tab == .walk)
                     .opacity(tab == .walk ? 1 : 0)
                     .allowsHitTesting(tab == .walk)
                 MenuView()
@@ -109,6 +115,7 @@ private struct TabStrip: View {
             ForEach(AppTab.allCases) { tab in
                 let isSelected = tab == selection
                 Button {
+                    if selection != tab { Haptics.select() }
                     withAnimation(.snappy(duration: 0.25)) { selection = tab }
                 } label: {
                     VStack(spacing: 8) {

@@ -53,6 +53,14 @@ final class RoutePlanner: ObservableObject {
     @Published private(set) var googleError: String?
 
     private var googleCache: [String: WalkLeg] = [:]
+
+    /// Walks that reach `stepsNeeded` first (shortest first), then the rest
+    /// (longest first, since they get closest).
+    func ranked(for stepsNeeded: Int, limit: Int = 8) -> [WalkSuggestion] {
+        let reaching = suggestions.filter { $0.steps >= stepsNeeded }.sorted { $0.steps < $1.steps }
+        let short = suggestions.filter { $0.steps < stepsNeeded }.sorted { $0.steps > $1.steps }
+        return Array((reaching + short).prefix(limit))
+    }
     private var appleCache: [String: WalkLeg] = [:]
 
     func plan(home: SavedPlace?, destinations: [SavedPlace]) async {

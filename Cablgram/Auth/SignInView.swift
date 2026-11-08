@@ -41,6 +41,7 @@ struct SignInView: View {
 
                 VStack(spacing: 14) {
                     Button {
+                        Haptics.press()
                         Task { await auth.signInWithGoogle() }
                     } label: {
                         HStack(spacing: 10) {

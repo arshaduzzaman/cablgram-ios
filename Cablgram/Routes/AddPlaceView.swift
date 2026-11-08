@@ -31,6 +31,7 @@ struct AddPlaceView: View {
 
                     if let currentLocation {
                         Button {
+                            Haptics.tap()
                             add(name: kind == .home ? "Home" : "My spot", coordinate: currentLocation.coordinate)
                         } label: {
                             Label("Use my current location", systemImage: "location.fill")
@@ -52,7 +53,10 @@ struct AddPlaceView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        Haptics.tap()
+                        dismiss()
+                    }
                 }
             }
         }
@@ -64,7 +68,10 @@ struct AddPlaceView: View {
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(SavedPlace.Kind.allCases) { option in
                     let isOn = option == kind
-                    Button { kind = option } label: {
+                    Button {
+                        if kind != option { Haptics.select() }
+                        kind = option
+                    } label: {
                         VStack(spacing: 6) {
                             Image(systemName: option.systemImage).font(.title3)
                             Text(option.label).font(.caption.weight(.semibold)).lineLimit(1)
@@ -100,6 +107,7 @@ struct AddPlaceView: View {
             VStack(spacing: 0) {
                 ForEach(results) { result in
                     Button {
+                        Haptics.tap()
                         add(name: kind == .home ? "Home" : result.name,
                             coordinate: CLLocationCoordinate2D(latitude: result.latitude, longitude: result.longitude))
                     } label: {
@@ -134,10 +142,12 @@ struct AddPlaceView: View {
     private func search() async {
         let text = query.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
+        Haptics.tap()
         isSearching = true
         results = await PlaceSearch.search(text, near: currentLocation)
         isSearching = false
         searchedOnce = true
+        if results.isEmpty { Haptics.warning() }
     }
 
     private func add(name: String, coordinate: CLLocationCoordinate2D) {

@@ -88,6 +88,12 @@ final class LeaderboardStore: ObservableObject {
         }
     }
 
+    /// 1-based all-time rank of a user, if they're in the top 100.
+    func rank(of uid: String?) -> Int? {
+        guard let uid else { return nil }
+        return entries.firstIndex { $0.id == uid }.map { $0 + 1 }
+    }
+
     /// Top walkers today (only people who've synced today).
     var today: [LeaderboardEntry] {
         let key = Self.todayKey

@@ -34,7 +34,10 @@ struct NewsView: View {
             .padding(.bottom, 24)
         }
         .background(Color(.systemGroupedBackground))
-        .refreshable { await feed.refresh() }
+        .refreshable {
+            Haptics.soft()
+            await feed.refresh()
+        }
         .task {
             if feed.posts.isEmpty { await feed.refresh() }
         }
@@ -86,6 +89,7 @@ private struct NewsCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
+                Haptics.tap()
                 if let url = URL(string: post.permalink) { openURL(url) }
             } label: {
                 AsyncImage(url: URL(string: post.imageUrl)) { phase in
@@ -113,7 +117,11 @@ private struct NewsCard: View {
                     ShareLink(item: url) {
                         Image(systemName: "square.and.arrow.up")
                     }
-                    Button { openURL(url) } label: {
+                    .simultaneousGesture(TapGesture().onEnded { Haptics.tap() })
+                    Button {
+                        Haptics.tap()
+                        openURL(url)
+                    } label: {
                         Image(systemName: "arrow.up.right")
                     }
                 }

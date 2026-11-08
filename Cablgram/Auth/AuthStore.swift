@@ -27,6 +27,11 @@ final class AuthStore: ObservableObject {
     private var listener: AuthStateDidChangeListenerHandle?
 
     init() {
+        #if DEBUG
+        // `-skipSignIn` launch argument: open the app without signing in, for
+        // checking screens in the Simulator. Debug builds only.
+        if ProcessInfo.processInfo.arguments.contains("-skipSignIn") { skippedSignIn = true }
+        #endif
         guard Self.isConfigured else { return }
         user = Auth.auth().currentUser
         listener = Auth.auth().addStateDidChangeListener { [weak self] _, user in
@@ -65,11 +70,13 @@ final class AuthStore: ObservableObject {
                                                            accessToken: result.user.accessToken.tokenString)
             try await Auth.auth().signIn(with: credential)
             errorMessage = nil
+            Haptics.success()
         } catch let error as NSError where error.domain == kGIDSignInErrorDomain
                     && error.code == GIDSignInError.canceled.rawValue {
             // The user closed the Google sheet; nothing to report.
         } catch {
             errorMessage = error.localizedDescription
+            Haptics.error()
         }
     }
 

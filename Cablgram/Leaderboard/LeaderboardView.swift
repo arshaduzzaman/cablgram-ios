@@ -1,5 +1,6 @@
 import SwiftUI
 
+/// Full leaderboard, opened from "See all" on the Walk page.
 struct LeaderboardView: View {
     enum Period: String, CaseIterable, Identifiable {
         case allTime = "All time"
@@ -31,23 +32,21 @@ struct LeaderboardView: View {
                     ForEach(Period.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: period) { _, _ in Haptics.select() }
 
-                if !AuthStore.isConfigured || auth.user == nil {
-                    notice("Sign in with Google to join the leaderboard.", icon: "person.crop.circle.badge.exclamationmark")
-                } else if let error = leaderboard.errorMessage {
-                    notice("Couldn't load the leaderboard: \(error)", icon: "exclamationmark.triangle.fill")
-                } else if rows.isEmpty {
-                    notice(period == .today ? "Nobody has walked yet today. Be the first!" : "No walkers yet. Start walking to take #1!",
-                           icon: "trophy")
+                if let notice = LeaderboardNotice.current(auth: auth, leaderboard: leaderboard, isEmpty: rows.isEmpty,
+                                                          emptyText: period == .today
+                                                              ? "Nobody has walked yet today. Be the first!"
+                                                              : "No walkers yet. Start walking to take #1!") {
+                    notice
                 } else {
                     if let myRank {
                         HStack {
-                            Text("You're #\(myRank)")
-                                .font(.headline)
+                            Text("You're #\(myRank)").font(.headline)
                             Spacer()
                             Text(period == .allTime ? "all time" : "today")
                                 .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .opacity(0.85)
                         }
                         .padding(14)
                         .foregroundStyle(.white)
@@ -56,7 +55,8 @@ struct LeaderboardView: View {
 
                     VStack(spacing: 0) {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { index, entry in
-                            row(rank: index + 1, entry: entry)
+                            LeaderRow(rank: index + 1, entry: entry, steps: steps(of: entry),
+                                      isMe: entry.id == auth.user?.uid)
                             if index < rows.count - 1 { Divider().padding(.leading, 64) }
                         }
                     }
@@ -67,10 +67,17 @@ struct LeaderboardView: View {
         }
         .background(Color(.systemGroupedBackground))
     }
+}
 
-    private func row(rank: Int, entry: LeaderboardEntry) -> some View {
-        let isMe = entry.id == auth.user?.uid
-        return HStack(spacing: 12) {
+/// One leaderboard line: rank or medal, photo, name, steps.
+struct LeaderRow: View {
+    let rank: Int
+    let entry: LeaderboardEntry
+    let steps: Int
+    let isMe: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
             Text(rank <= 3 ? ["🥇", "🥈", "🥉"][rank - 1] : "\(rank)")
                 .font(rank <= 3 ? .title3 : .subheadline.weight(.bold).monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -80,7 +87,7 @@ struct LeaderboardView: View {
                 .font(.subheadline.weight(isMe ? .bold : .medium))
                 .lineLimit(1)
             Spacer()
-            Text(steps(of: entry).formatted())
+            Text(steps.formatted())
                 .font(.subheadline.weight(.semibold).monospacedDigit())
                 .foregroundStyle(isMe ? Color.brand : .primary)
         }
@@ -88,13 +95,34 @@ struct LeaderboardView: View {
         .padding(.vertical, 10)
         .background(isMe ? Color.brand.opacity(0.08) : .clear)
     }
+}
 
-    private func notice(_ text: String, icon: String) -> some View {
+/// Message shown instead of the leaderboard when there's nothing to list.
+struct LeaderboardNotice: View {
+    let text: String
+    let icon: String
+
+    var body: some View {
         Label(text, systemImage: icon)
             .font(.subheadline)
             .foregroundStyle(.secondary)
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .card(cornerRadius: 18)
+    }
+
+    @MainActor
+    static func current(auth: AuthStore, leaderboard: LeaderboardStore, isEmpty: Bool, emptyText: String) -> LeaderboardNotice? {
+        if !AuthStore.isConfigured || auth.user == nil {
+            return LeaderboardNotice(text: "Sign in with Google to join the leaderboard.",
+                                     icon: "person.crop.circle.badge.exclamationmark")
+        }
+        if let error = leaderboard.errorMessage {
+            return LeaderboardNotice(text: "Couldn't load the leaderboard: \(error)", icon: "exclamationmark.triangle.fill")
+        }
+        if isEmpty {
+            return LeaderboardNotice(text: emptyText, icon: "trophy")
+        }
+        return nil
     }
 }

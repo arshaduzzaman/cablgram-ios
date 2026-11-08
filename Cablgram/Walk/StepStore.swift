@@ -12,6 +12,9 @@ final class StepStore: ObservableObject {
     @Published private(set) var access: Access = .notRequested
     @Published private(set) var stepsSinceJoining = 0
     @Published private(set) var stepsToday = 0
+    /// True once the first step count has arrived (or Health is unavailable),
+    /// so the UI can tell real progress apart from the initial load.
+    @Published private(set) var hasLoaded = false
     @Published private(set) var claimedRewardIDs: Set<String>
 
     private let health = HKHealthStore()
@@ -48,6 +51,10 @@ final class StepStore: ObservableObject {
         #endif
     }
 
+    var unlockedCount: Int {
+        Reward.all.filter { totalSteps >= $0.steps }.count
+    }
+
     var nextReward: Reward? {
         Reward.all.first { $0.steps > totalSteps }
     }
@@ -66,6 +73,7 @@ final class StepStore: ObservableObject {
     func start() async {
         guard HKHealthStore.isHealthDataAvailable() else {
             access = .unavailable
+            hasLoaded = true
             return
         }
         do {
@@ -73,6 +81,7 @@ final class StepStore: ObservableObject {
             access = .ready
         } catch {
             access = .unavailable
+            hasLoaded = true
             return
         }
         await refresh()
@@ -84,6 +93,7 @@ final class StepStore: ObservableObject {
         let startOfToday = Calendar.current.startOfDay(for: .now)
         stepsSinceJoining = await sumOfSteps(from: joinDate)
         stepsToday = await sumOfSteps(from: startOfToday)
+        hasLoaded = true
     }
 
     private func sumOfSteps(from start: Date) async -> Int {
