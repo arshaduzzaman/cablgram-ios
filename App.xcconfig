@@ -6,6 +6,6 @@
 GOOGLE_MAPS_API_KEY =
 
 // Google Sign-In callback scheme: REVERSED_CLIENT_ID from GoogleService-Info.plist.
-GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.not-configured
+GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.984186551907-9vagb2l8avod47off47ktq532d8fdpj1
 
 #include? "Secrets.xcconfig"
