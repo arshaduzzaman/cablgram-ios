@@ -4,6 +4,10 @@ import SwiftUI
 struct CablgramApp: App {
     @StateObject private var steps = StepStore()
 
+    init() {
+        GoogleMapsConfig.activate()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -13,20 +17,26 @@ struct CablgramApp: App {
     }
 }
 
-struct ContentView: View {
-    var body: some View {
-        TabView {
-            NewsView()
-                .tabItem { Label("News", systemImage: "newspaper.fill") }
-            WalkView()
-                .tabItem { Label("Walk", systemImage: "figure.walk") }
-            RoutesView()
-                .tabItem { Label("Routes", systemImage: "map.fill") }
-        }
-    }
+enum AppTab: Hashable {
+    case news, walk, routes
 }
 
-extension Color {
-    /// Cablgram pink (#FF2684), from the asset catalog.
-    static let brand = Color("Brand")
+struct ContentView: View {
+    @EnvironmentObject private var steps: StepStore
+    @State private var tab: AppTab = .news
+
+    var body: some View {
+        TabView(selection: $tab) {
+            NewsView(openWalk: { tab = .walk })
+                .tabItem { Label("News", systemImage: "newspaper.fill") }
+                .tag(AppTab.news)
+            WalkView()
+                .tabItem { Label("Walk", systemImage: "figure.walk") }
+                .tag(AppTab.walk)
+            RoutesView()
+                .tabItem { Label("Routes", systemImage: "map.fill") }
+                .tag(AppTab.routes)
+        }
+        .task { await steps.start() }
+    }
 }

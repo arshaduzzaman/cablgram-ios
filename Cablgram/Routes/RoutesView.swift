@@ -1,8 +1,7 @@
 import SwiftUI
-import MapKit
 
-/// Map of your usual places, plus walks between them that reach today's
-/// step goal.
+/// Full-screen map of your usual places, with a bottom panel of walks that
+/// reach today's step goal.
 struct RoutesView: View {
     @EnvironmentObject private var steps: StepStore
     @StateObject private var places = PlacesStore()
@@ -12,7 +11,7 @@ struct RoutesView: View {
     @AppStorage("walk.dailyGoal") private var dailyGoal = 8_000
     @State private var selectedID: WalkSuggestion.ID?
     @State private var addingKind: SavedPlace.Kind?
-    @State private var camera: MapCameraPosition = .userLocation(fallback: .automatic)
+    @State private var isExpanded = false
 
     private var stepsNeeded: Int { max(dailyGoal - steps.stepsToday, 0) }
 
@@ -30,206 +29,305 @@ struct RoutesView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                map
-                    .frame(height: 280)
-                List {
-                    goalSection
-                    suggestionsSection
-                    placesSection
+        GeometryReader { geo in
+            let panelHeight = geo.size.height * (isExpanded ? 0.74 : 0.44)
+
+            ZStack(alignment: .top) {
+                RouteMap(places: places.places, walk: selected, bottomInset: panelHeight)
+                    .ignoresSafeArea(edges: .top)
+
+                topBar
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+
+                VStack {
+                    Spacer()
+                    panel.frame(height: panelHeight)
                 }
             }
-            .navigationTitle("Routes")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                Button { addingKind = places.home == nil ? .home : .other } label: {
-                    Image(systemName: "plus")
+            .animation(.spring(duration: 0.35), value: isExpanded)
+        }
+        .sheet(item: $addingKind) { kind in
+            AddPlaceView(initialKind: kind, currentLocation: location.lastLocation) { place in
+                places.add(place)
+            }
+            .presentationDetents([.large])
+        }
+        .task(id: places.places) {
+            selectedID = nil
+            await planner.plan(home: places.home, destinations: places.destinations)
+        }
+        .onAppear { location.requestOnce() }
+    }
+
+    // MARK: - Floating top bar
+
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().stroke(Color.brand.opacity(0.2), lineWidth: 4)
+                    Circle()
+                        .trim(from: 0, to: min(Double(steps.stepsToday) / Double(dailyGoal), 1))
+                        .stroke(.brandGradient, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 26, height: 26)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("\(steps.stepsToday.formatted()) / \(dailyGoal.formatted())")
+                        .font(.subheadline.bold().monospacedDigit())
+                    Text(stepsNeeded == 0 ? "Goal reached 🎉" : "\(stepsNeeded.formatted()) steps to go")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .sheet(item: $addingKind) { kind in
-                AddPlaceView(initialKind: kind, currentLocation: location.lastLocation) { place in
-                    places.add(place)
-                }
+            .padding(.leading, 10)
+            .padding(.trailing, 16)
+            .padding(.vertical, 8)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+
+            Spacer()
+
+            Button { addingKind = places.home == nil ? .home : .other } label: {
+                Image(systemName: "plus")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(.brandGradient, in: Circle())
+                    .shadow(color: Color.brand.opacity(0.35), radius: 8, y: 3)
             }
-            .task(id: places.places) {
-                selectedID = nil
-                camera = .automatic
-                await planner.plan(home: places.home, destinations: places.destinations)
-            }
-            .onAppear { location.requestOnce() }
-            .onChange(of: selectedID) { _, _ in
-                withAnimation {
-                    camera = selected.map { .rect($0.mapRect) } ?? .automatic
-                }
-            }
+            .accessibilityLabel("Add a place")
         }
     }
 
-    // MARK: - Map
+    // MARK: - Bottom panel
 
-    private var map: some View {
-        Map(position: $camera) {
-            UserAnnotation()
+    private var panel: some View {
+        VStack(spacing: 0) {
+            Capsule()
+                .fill(Color.secondary.opacity(0.35))
+                .frame(width: 40, height: 5)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+                .onTapGesture { isExpanded.toggle() }
+                .gesture(
+                    DragGesture(minimumDistance: 10).onEnded { value in
+                        if value.translation.height < -40 { isExpanded = true }
+                        if value.translation.height > 40 { isExpanded = false }
+                    }
+                )
 
-            ForEach(places.places) { place in
-                Annotation(place.name, coordinate: place.coordinate) {
-                    Image(systemName: place.kind.systemImage)
-                        .font(.caption.bold())
-                        .foregroundStyle(.white)
-                        .padding(7)
-                        .background(place.kind == .home ? Color.brand : Color.indigo, in: Circle())
-                        .overlay(Circle().stroke(.white, lineWidth: 2))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    goalRow
+                    suggestionsBlock
+                    placesBlock
                 }
-            }
-
-            if let selected {
-                ForEach(Array(drawnLegs(of: selected).enumerated()), id: \.offset) { _, leg in
-                    MapPolyline(coordinates: leg.coordinates)
-                        .stroke(Color.brand, style: StrokeStyle(lineWidth: 5, lineCap: .round,
-                                                                dash: leg.isEstimate ? [8, 8] : []))
-                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 20)
             }
         }
-        .mapControls {
-            MapUserLocationButton()
-            MapCompass()
-        }
+        .frame(maxWidth: .infinity)
+        .background(Color(.systemBackground),
+                    in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 16, y: -2)
     }
 
-    /// Legs to draw. A straight-line estimate there and back would draw the
-    /// same line twice and hide the dashes, so each estimated line is drawn once.
-    private func drawnLegs(of walk: WalkSuggestion) -> [WalkLeg] {
-        var seen = Set<String>()
-        return walk.legs.filter { leg in
-            guard leg.isEstimate, let a = leg.coordinates.first, let b = leg.coordinates.last else { return true }
-            let ends = [a, b].map { "\($0.latitude),\($0.longitude)" }.sorted().joined(separator: "|")
-            return seen.insert(ends).inserted
-        }
-    }
-
-    // MARK: - Sections
-
-    private var goalSection: some View {
-        Section {
-            Stepper(value: $dailyGoal, in: 2_000...30_000, step: 1_000) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Daily goal: \(dailyGoal.formatted()) steps").font(.headline)
-                    Text(stepsNeeded == 0
-                         ? "Goal reached today 🎉"
-                         : "\(stepsNeeded.formatted()) more steps to go today")
-                        .font(.subheadline)
-                        .foregroundStyle(stepsNeeded == 0 ? Color.brand : .secondary)
-                }
+    private var goalRow: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Daily goal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Text("\(dailyGoal.formatted()) steps")
+                    .font(.title3.bold().monospacedDigit())
+                    .contentTransition(.numericText())
+            }
+            Spacer()
+            HStack(spacing: 8) {
+                roundButton("minus") { dailyGoal = max(2_000, dailyGoal - 1_000) }
+                roundButton("plus") { dailyGoal = min(30_000, dailyGoal + 1_000) }
             }
         }
+        .animation(.snappy, value: dailyGoal)
+    }
+
+    private func roundButton(_ systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.subheadline.bold())
+                .frame(width: 36, height: 36)
+                .background(Color(.secondarySystemBackground), in: Circle())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
-    private var suggestionsSection: some View {
-        Section {
+    private var suggestionsBlock: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Ways to reach your goal").font(.headline)
+
             if places.home == nil {
-                Button { addingKind = .home } label: {
-                    Label("Set your home to get walk ideas", systemImage: "house.fill")
-                }
+                emptyPrompt("Set your home to get walk ideas", systemImage: "house.fill") { addingKind = .home }
             } else if places.destinations.isEmpty {
-                Button { addingKind = .other } label: {
-                    Label("Add places you go often", systemImage: "mappin.and.ellipse")
-                }
+                emptyPrompt("Add places you go often", systemImage: "mappin.and.ellipse") { addingKind = .other }
             } else if planner.isPlanning {
                 HStack(spacing: 10) {
                     ProgressView()
                     Text("Finding walking routes…").foregroundStyle(.secondary)
                 }
+                .padding(.vertical, 8)
             } else {
                 ForEach(ranked) { walk in
-                    SuggestionRow(walk: walk,
-                                  reachesGoal: stepsNeeded > 0 && walk.steps >= stepsNeeded,
-                                  isSelected: walk.id == selectedID)
-                        .contentShape(Rectangle())
+                    SuggestionCard(walk: walk,
+                                   reachesGoal: stepsNeeded > 0 && walk.steps >= stepsNeeded,
+                                   isSelected: walk.id == selectedID)
                         .onTapGesture {
                             selectedID = selectedID == walk.id ? nil : walk.id
+                            if selectedID != nil { isExpanded = false }
                         }
                 }
             }
 
             if stepsNeeded > 0 {
-                Label {
-                    Text("Taking a rickshaw or bus today? Get off 1 km early and walk the rest: about **+1,300 steps**.")
-                        .font(.subheadline)
-                } icon: {
+                HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "lightbulb.fill").foregroundStyle(.yellow)
+                    Text("Taking a rickshaw or bus? Get off 1 km early and walk the rest: about **+1,300 steps**.")
+                        .font(.subheadline)
                 }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
-        } header: {
-            Text("Ways to reach your goal")
-        } footer: {
+
             if planner.suggestions.contains(where: \.isEstimate) {
-                Text("Dashed lines are estimates where Apple Maps has no walking route.")
+                Text("Dashed lines are straight-line estimates where no walking route was found.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let error = planner.googleError {
+                Text("Google Maps: \(error)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
         }
     }
 
-    private var placesSection: some View {
-        Section {
-            ForEach(places.places) { place in
-                Label(place.name, systemImage: place.kind.systemImage)
+    private func emptyPrompt(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(Color.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.brand)
+    }
+
+    private var placesBlock: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Your places").font(.headline)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(places.places) { place in
+                        Label(place.name, systemImage: place.kind.systemImage)
+                            .font(.subheadline.weight(.medium))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color(.secondarySystemBackground), in: Capsule())
+                            .contextMenu {
+                                Button(role: .destructive) { places.remove(place) } label: {
+                                    Label("Remove", systemImage: "trash")
+                                }
+                            }
+                    }
+                    Button { addingKind = places.home == nil ? .home : .other } label: {
+                        Label("Add", systemImage: "plus")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.brand.opacity(0.12), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.brand)
+                }
             }
-            .onDelete { offsets in
-                offsets.map { places.places[$0] }.forEach(places.remove)
-            }
-            Button { addingKind = places.home == nil ? .home : .other } label: {
-                Label("Add a place", systemImage: "plus.circle.fill")
-            }
+
+            Text("Saved only on this phone. Long-press a place to remove it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             #if DEBUG
             Button("Load sample Dhaka places (debug)") { places.addSampleDhakaPlaces() }
+                .font(.caption)
             #endif
-        } header: {
-            Text("Your places")
-        } footer: {
-            Text("Saved only on this phone. Swipe left to remove.")
         }
     }
 }
 
-private struct SuggestionRow: View {
+private struct SuggestionCard: View {
     let walk: WalkSuggestion
     let reachesGoal: Bool
     let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
                 Text(walk.title)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
-                Text("\(walk.meters / 1000, format: .number.precision(.fractionLength(1))) km · \(walk.minutes) min · ~\(walk.steps.formatted()) steps")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Spacer()
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "map")
+                    .foregroundStyle(isSelected ? Color.brand : .secondary)
+            }
+
+            HStack(spacing: 16) {
+                metric("figure.walk", "~\(walk.steps.formatted())")
+                metric("clock", "\(walk.minutes) min")
+                metric("ruler", String(format: "%.1f km", walk.meters / 1000))
+            }
+
+            if reachesGoal || walk.isEstimate {
                 HStack(spacing: 6) {
                     if reachesGoal {
-                        Text("Reaches your goal")
-                            .font(.caption2.bold())
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.brand, in: Capsule())
+                        tag("Reaches your goal", foreground: .white, background: AnyShapeStyle(.brandGradient))
                     }
                     if walk.isEstimate {
-                        Text("Estimated")
-                            .font(.caption2.bold())
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color(.tertiarySystemFill), in: Capsule())
+                        tag("Estimated", foreground: .secondary, background: AnyShapeStyle(Color(.tertiarySystemFill)))
                     }
                 }
             }
-            Spacer()
-            Image(systemName: isSelected ? "map.fill" : "map")
-                .foregroundStyle(isSelected ? Color.brand : .secondary)
         }
-        .padding(.vertical, 2)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isSelected ? Color.brand.opacity(0.08) : Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(isSelected ? Color.brand : .clear, lineWidth: 1.5)
+        )
+        .contentShape(Rectangle())
+    }
+
+    private func metric(_ systemImage: String, _ text: String) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .labelStyle(.titleAndIcon)
+    }
+
+    private func tag(_ text: String, foreground: Color, background: AnyShapeStyle) -> some View {
+        Text(text)
+            .font(.caption2.bold())
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(background, in: Capsule())
     }
 }
 

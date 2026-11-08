@@ -6,61 +6,82 @@ struct WalkView: View {
     @State private var justClaimed: Reward?
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    ProgressRing()
-                        .frame(maxWidth: .infinity)
-                        .listRowBackground(Color.clear)
-                }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                ScreenHeader(eyebrow: "Every step counts", title: "Walk")
+
+                StepsHero()
 
                 if steps.access == .unavailable {
-                    Section {
-                        Label("Step counting needs Apple Health, which isn't available on this device.",
-                              systemImage: "exclamationmark.triangle")
-                            .font(.callout)
-                    }
+                    Label("Step counting needs Apple Health, which isn't available on this device.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .card()
                 }
 
-                Section {
+                Text("Rewards")
+                    .font(.title3.bold())
+                    .padding(.top, 4)
+
+                VStack(spacing: 12) {
                     ForEach(Reward.all) { reward in
-                        RewardRow(reward: reward) {
+                        RewardCard(reward: reward) {
                             steps.claim(reward)
                             justClaimed = reward
                         }
                     }
-                } header: {
-                    Text("Rewards")
-                } footer: {
-                    Text("Steps count from \(steps.joinDate.formatted(date: .abbreviated, time: .omitted)), when you joined.")
                 }
+
+                Text("Steps count from \(steps.joinDate.formatted(date: .abbreviated, time: .omitted)), when you joined.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 #if DEBUG
-                Section("Testing (debug builds only)") {
-                    Button("Add 1,000 test steps") { steps.addTestSteps(1_000) }
-                    Button("Add 10,000 test steps") { steps.addTestSteps(10_000) }
-                    Button("Reset test steps and claims", role: .destructive) { steps.resetTestProgress() }
-                }
+                debugTools
                 #endif
             }
-            .navigationTitle("Walk")
-            .task { await steps.start() }
-            .refreshable { await steps.refresh() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await steps.refresh() } }
-            }
-            .alert(item: $justClaimed) { reward in
-                Alert(
-                    title: Text("You earned it! 🎉"),
-                    message: Text("\(reward.title) is yours. You walked \(reward.steps.formatted()) steps to get it."),
-                    dismissButton: .default(Text("Nice"))
-                )
-            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 24)
+        }
+        .background(Color(.systemGroupedBackground))
+        .refreshable { await steps.refresh() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await steps.refresh() } }
+        }
+        .alert(item: $justClaimed) { reward in
+            Alert(
+                title: Text("You earned it! 🎉"),
+                message: Text("\(reward.partner) \(reward.title) is yours. You walked \(reward.steps.formatted()) steps for it."),
+                dismissButton: .default(Text("Nice"))
+            )
         }
     }
+
+    #if DEBUG
+    private var debugTools: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Testing (debug builds only)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            HStack {
+                Button("+1,000") { steps.addTestSteps(1_000) }
+                Button("+10,000") { steps.addTestSteps(10_000) }
+                Spacer()
+                Button("Reset", role: .destructive) { steps.resetTestProgress() }
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(14)
+        .card()
+    }
+    #endif
 }
 
-private struct ProgressRing: View {
+/// Gradient card with the step ring and today's numbers.
+private struct StepsHero: View {
     @EnvironmentObject private var steps: StepStore
 
     private var progress: Double {
@@ -70,48 +91,71 @@ private struct ProgressRing: View {
     }
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 18) {
             ZStack {
                 Circle()
-                    .stroke(Color.brand.opacity(0.15), lineWidth: 18)
+                    .stroke(.white.opacity(0.25), lineWidth: 16)
                 Circle()
                     .trim(from: 0, to: progress)
-                    .stroke(Color.brand, style: StrokeStyle(lineWidth: 18, lineCap: .round))
+                    .stroke(.white, style: StrokeStyle(lineWidth: 16, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(.spring(duration: 0.6), value: progress)
-                VStack(spacing: 2) {
-                    Image(systemName: "figure.walk")
-                        .font(.title2)
-                        .foregroundStyle(Color.brand)
+                VStack(spacing: 0) {
                     Text(steps.totalSteps.formatted())
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .contentTransition(.numericText())
+                        .font(.system(size: 44, weight: .bold, design: .rounded))
                         .monospacedDigit()
+                        .contentTransition(.numericText())
                     Text("total steps")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.subheadline.weight(.medium))
+                        .opacity(0.85)
                 }
             }
-            .frame(width: 220, height: 220)
-            .padding(.top, 8)
+            .frame(width: 190, height: 190)
 
-            Text("Today: \(steps.stepsToday.formatted()) steps")
-                .font(.headline)
+            HStack(spacing: 10) {
+                StatPill(value: steps.stepsToday.formatted(), label: "Today")
+                if let next = steps.nextReward {
+                    StatPill(value: (next.steps - steps.totalSteps).formatted(), label: "To next reward")
+                } else {
+                    StatPill(value: "All", label: "Rewards unlocked")
+                }
+            }
 
             if let next = steps.nextReward {
-                Text("\((next.steps - steps.totalSteps).formatted()) steps to \(next.title)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("You've unlocked every reward!")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(Color.brand)
+                Label("Next: \(next.partner) \(next.title)", systemImage: next.systemImage)
+                    .font(.subheadline.weight(.semibold))
             }
         }
+        .foregroundStyle(.white)
+        .padding(22)
+        .frame(maxWidth: .infinity)
+        .background(.brandGradient, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .shadow(color: Color.brand.opacity(0.3), radius: 18, y: 8)
     }
 }
 
-private struct RewardRow: View {
+private struct StatPill: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.title3.bold().monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .textCase(.uppercase)
+                .opacity(0.85)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct RewardCard: View {
     @EnvironmentObject private var steps: StepStore
     let reward: Reward
     let onClaim: () -> Void
@@ -122,39 +166,54 @@ private struct RewardRow: View {
 
         HStack(spacing: 14) {
             Image(systemName: reward.systemImage)
-                .font(.title2)
-                .frame(width: 44, height: 44)
+                .font(.title3)
                 .foregroundStyle(unlocked ? .white : Color.brand)
-                .background(unlocked ? Color.brand : Color.brand.opacity(0.12),
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .frame(width: 48, height: 48)
+                .background(unlocked ? AnyShapeStyle(.brandGradient) : AnyShapeStyle(Color.brand.opacity(0.12)),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(reward.title).font(.headline)
-                if unlocked {
-                    Text("\(reward.steps.formatted()) steps").font(.caption).foregroundStyle(.secondary)
-                } else {
-                    ProgressView(value: Double(steps.totalSteps), total: Double(reward.steps))
-                    Text("\(steps.totalSteps.formatted()) / \(reward.steps.formatted())")
-                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            VStack(alignment: .leading, spacing: 5) {
+                Text(reward.partner)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(reward.title)
+                    .font(.headline)
+                if !unlocked {
+                    GradientProgressBar(fraction: Double(steps.totalSteps) / Double(reward.steps))
+                        .padding(.top, 2)
                 }
+                Text(unlocked
+                     ? "\(reward.steps.formatted()) steps"
+                     : "\(steps.totalSteps.formatted()) / \(reward.steps.formatted()) steps")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
 
             Spacer(minLength: 8)
 
             if claimed {
-                Label("Claimed", systemImage: "checkmark.seal.fill")
-                    .labelStyle(.iconOnly)
+                Image(systemName: "checkmark.seal.fill")
                     .font(.title2)
                     .foregroundStyle(.green)
+                    .accessibilityLabel("Claimed")
             } else if unlocked {
-                Button("Claim", action: onClaim)
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.capsule)
+                Button(action: onClaim) {
+                    Text("Claim")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(.brandGradient, in: Capsule())
+                }
+                .buttonStyle(.plain)
             } else {
-                Image(systemName: "lock.fill").foregroundStyle(.tertiary)
+                Image(systemName: "lock.fill")
+                    .foregroundStyle(.tertiary)
             }
         }
-        .padding(.vertical, 4)
+        .padding(14)
+        .card()
     }
 }
 

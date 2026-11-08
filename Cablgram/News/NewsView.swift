@@ -1,40 +1,88 @@
 import SwiftUI
 
 struct NewsView: View {
+    var openWalk: () -> Void = {}
+
+    @EnvironmentObject private var steps: StepStore
     @StateObject private var feed = NewsFeed()
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 16) {
-                    if let message = feed.errorMessage, feed.posts.isEmpty {
-                        ContentUnavailableView(
-                            "No news right now",
-                            systemImage: "wifi.exclamationmark",
-                            description: Text(message)
-                        )
-                        .padding(.top, 80)
-                    }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                header
+                stepsShortcut
 
-                    ForEach(feed.posts) { post in
-                        NewsCard(post: post)
-                            .task { await feed.loadMoreIfNeeded(after: post) }
-                    }
+                if let message = feed.errorMessage, feed.posts.isEmpty {
+                    ContentUnavailableView("No news right now",
+                                           systemImage: "wifi.exclamationmark",
+                                           description: Text(message))
+                        .padding(.top, 60)
+                }
 
-                    if feed.isLoading {
-                        ProgressView().padding()
+                ForEach(feed.posts) { post in
+                    NewsCard(post: post)
+                        .task { await feed.loadMoreIfNeeded(after: post) }
+                }
+
+                if feed.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 24)
+        }
+        .background(Color(.systemGroupedBackground))
+        .refreshable { await feed.refresh() }
+        .task {
+            if feed.posts.isEmpty { await feed.refresh() }
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(Date.now, format: .dateTime.weekday(.wide).day().month(.wide))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            HStack(spacing: 0) {
+                Text("cabl.")
+                Text("gram").foregroundStyle(.brandGradient)
+            }
+            .font(.system(size: 34, weight: .heavy, design: .rounded))
+        }
+        .padding(.top, 8)
+    }
+
+    /// Today's steps, linking to the Walk tab.
+    private var stepsShortcut: some View {
+        Button(action: openWalk) {
+            HStack(spacing: 12) {
+                Image(systemName: "figure.walk")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(.brandGradient, in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(steps.stepsToday.formatted()) steps today")
+                        .font(.subheadline.weight(.semibold))
+                    if let next = steps.nextReward {
+                        Text("\((next.steps - steps.totalSteps).formatted()) to go for \(next.partner) \(next.title)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
-                .padding(.horizontal)
-                .padding(.top, 8)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Cablgram")
-            .refreshable { await feed.refresh() }
-            .task {
-                if feed.posts.isEmpty { await feed.refresh() }
-            }
+            .padding(12)
+            .card(cornerRadius: 20)
         }
+        .buttonStyle(.plain)
     }
 }
 
@@ -43,10 +91,10 @@ private struct NewsCard: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        Button {
-            if let url = URL(string: post.permalink) { openURL(url) }
-        } label: {
-            VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                if let url = URL(string: post.permalink) { openURL(url) }
+            } label: {
                 AsyncImage(url: URL(string: post.imageUrl)) { phase in
                     switch phase {
                     case .success(let image):
@@ -58,24 +106,32 @@ private struct NewsCard: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-
-                HStack {
-                    if let date = post.date {
-                        Text(date, format: .relative(presentation: .named))
-                    }
-                    Spacer()
-                    Label("Open", systemImage: "arrow.up.right")
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(Color.brand)
-                }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(12)
             }
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .buttonStyle(.plain)
+
+            HStack(spacing: 14) {
+                if let date = post.date {
+                    Text(date, format: .relative(presentation: .named))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let url = URL(string: post.permalink) {
+                    ShareLink(item: url) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    Button { openURL(url) } label: {
+                        Image(systemName: "arrow.up.right")
+                    }
+                }
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color.brand)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
         }
-        .buttonStyle(.plain)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .card()
     }
 
     private func placeholder(systemImage: String?) -> some View {
@@ -92,5 +148,5 @@ private struct NewsCard: View {
 }
 
 #Preview {
-    NewsView()
+    NewsView().environmentObject(StepStore())
 }

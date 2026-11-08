@@ -1,0 +1,7 @@
+// Shared build settings for the Cablgram target.
+//
+// The Google Maps API key lives in Secrets.xcconfig, which is git-ignored.
+// Copy Secrets.example.xcconfig to Secrets.xcconfig and paste your key there.
+// Without a key the app falls back to Apple Maps.
+GOOGLE_MAPS_API_KEY =
+#include? "Secrets.xcconfig"
