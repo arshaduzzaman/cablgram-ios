@@ -14,6 +14,14 @@ enum GoogleMapsConfig {
         !apiKey.isEmpty && !apiKey.hasPrefix("$(") && apiKey != "paste-your-key-here"
     }
 
+    /// Black-and-white map, so Cablgram's pink route and pins are the only colour.
+    static let monochromeStyle = """
+    [{"stylers":[{"saturation":-100}]},
+     {"featureType":"water","stylers":[{"lightness":-8}]},
+     {"featureType":"poi.business","stylers":[{"visibility":"off"}]},
+     {"featureType":"transit","elementType":"labels.icon","stylers":[{"visibility":"off"}]}]
+    """
+
     static func activate() {
         if isEnabled { GMSServices.provideAPIKey(apiKey) }
     }

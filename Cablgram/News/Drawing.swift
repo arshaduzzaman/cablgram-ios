@@ -52,29 +52,57 @@ struct Stroke: Codable, Identifiable {
     }
 }
 
-/// Doodles per post, saved on the phone.
+/// A drawing left on a post, like a comment.
+struct DoodleComment: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var author: String
+    var date: Date
+    var strokes: [Stroke]
+
+    static func == (lhs: DoodleComment, rhs: DoodleComment) -> Bool { lhs.id == rhs.id }
+}
+
+/// Drawing comments per post, saved on the phone for now. A backend can
+/// replace this later so everyone sees each other's drawings.
 @MainActor
 final class DrawingStore: ObservableObject {
-    @Published private(set) var drawings: [String: [Stroke]] = [:]
+    @Published private(set) var comments: [String: [DoodleComment]] = [:]
 
-    private let url: URL = {
+    private static let folder: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("doodles.json")
+        return dir
     }()
+    private let url = folder.appendingPathComponent("doodle-comments.json")
 
     init() {
         if let data = try? Data(contentsOf: url),
-           let saved = try? JSONDecoder().decode([String: [Stroke]].self, from: data) {
-            drawings = saved
+           let saved = try? JSONDecoder().decode([String: [DoodleComment]].self, from: data) {
+            comments = saved
+        } else if let data = try? Data(contentsOf: Self.folder.appendingPathComponent("doodles.json")),
+                  let old = try? JSONDecoder().decode([String: [Stroke]].self, from: data) {
+            // Drawings from the earlier version become your first comments.
+            comments = old.mapValues { [DoodleComment(author: "You", date: .now, strokes: $0)] }
+            save()
         }
     }
 
-    func strokes(for postID: String) -> [Stroke] { drawings[postID] ?? [] }
+    func comments(for postID: String) -> [DoodleComment] { comments[postID] ?? [] }
 
-    func save(_ strokes: [Stroke], for postID: String) {
-        drawings[postID] = strokes.isEmpty ? nil : strokes
-        if let data = try? JSONEncoder().encode(drawings) {
+    func post(_ strokes: [Stroke], by author: String, on postID: String) {
+        guard !strokes.isEmpty else { return }
+        comments[postID, default: []].append(DoodleComment(author: author, date: .now, strokes: strokes))
+        save()
+    }
+
+    func delete(_ commentID: UUID, on postID: String) {
+        comments[postID]?.removeAll { $0.id == commentID }
+        if comments[postID]?.isEmpty == true { comments[postID] = nil }
+        save()
+    }
+
+    private func save() {
+        if let data = try? JSONEncoder().encode(comments) {
             try? data.write(to: url, options: .atomic)
         }
     }
@@ -130,6 +158,25 @@ final class DrawHaptics {
         pen = nil
         engine?.stop()
         engine = nil
+    }
+
+    /// The hold that turns the photo into a canvas: a firm thump that
+    /// swells briefly, like picking up a pen.
+    func pickUp() {
+        guard enabled else { return }
+        prepare()
+        let thump = transient(at: 0, intensity: 1, sharpness: 0.45)
+        let swell = CHHapticEvent(eventType: .hapticContinuous, parameters: [
+            CHHapticEventParameter(parameterID: .hapticIntensity, value: 0.6),
+            CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.3),
+        ], relativeTime: 0.02, duration: 0.14)
+        let fade = CHHapticParameterCurve(parameterID: .hapticIntensityControl, controlPoints: [
+            .init(relativeTime: 0.02, value: 1),
+            .init(relativeTime: 0.16, value: 0),
+        ], relativeTime: 0)
+        if let pattern = try? CHHapticPattern(events: [thump, swell], parameterCurves: [fade]) {
+            try? engine?.makePlayer(with: pattern).start(atTime: CHHapticTimeImmediate)
+        }
     }
 
     /// Pen touches the page.
@@ -240,196 +287,5 @@ final class DrawHaptics {
     private func play(_ events: [CHHapticEvent]) {
         guard let engine, let pattern = try? CHHapticPattern(events: events, parameters: []) else { return }
         try? engine.makePlayer(with: pattern).start(atTime: CHHapticTimeImmediate)
-    }
-}
-
-// MARK: - Editor
-
-/// Full-screen drawing on a post's picture.
-struct DrawingEditor: View {
-    let imageURL: URL?
-    let onDone: ([Stroke]) -> Void
-    let onCancel: () -> Void
-
-    @State private var strokes: [Stroke]
-    @State private var current: Stroke?
-    @State private var ink: InkColor = .pink
-    @State private var brush: BrushSize = .medium
-    @State private var haptics = DrawHaptics()
-    @State private var lastPoint: CGPoint?
-    @State private var lastTime: Date?
-    @State private var lastAngle: CGFloat?
-
-    init(imageURL: URL?, strokes: [Stroke], onDone: @escaping ([Stroke]) -> Void, onCancel: @escaping () -> Void) {
-        self.imageURL = imageURL
-        _strokes = State(initialValue: strokes)
-        self.onDone = onDone
-        self.onCancel = onCancel
-    }
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                topBar
-                Spacer(minLength: 12)
-                picture
-                Spacer(minLength: 12)
-                palette
-            }
-        }
-        .onAppear { haptics.prepare() }
-        .onDisappear { haptics.stop() }
-    }
-
-    private var topBar: some View {
-        HStack(spacing: 18) {
-            Button("Cancel") {
-                Haptics.tap()
-                onCancel()
-            }
-            .foregroundStyle(.white)
-
-            Spacer()
-
-            Button {
-                guard !strokes.isEmpty else { return }
-                haptics.undo()
-                withAnimation(.snappy) { _ = strokes.removeLast() }
-            } label: {
-                Image(systemName: "arrow.uturn.backward")
-            }
-            .disabled(strokes.isEmpty)
-
-            Button {
-                guard !strokes.isEmpty else { return }
-                haptics.wipe()
-                withAnimation(.easeOut(duration: 0.3)) { strokes.removeAll() }
-            } label: {
-                Image(systemName: "trash")
-            }
-            .disabled(strokes.isEmpty)
-
-            Button {
-                Haptics.success()
-                onDone(strokes)
-            } label: {
-                Text("Done")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
-                    .background(Color.brand, in: Capsule())
-            }
-        }
-        .font(.title3.weight(.semibold))
-        .foregroundStyle(.white)
-        .tint(.white)
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-    }
-
-    private var picture: some View {
-        AsyncImage(url: imageURL) { phase in
-            if let image = phase.image {
-                image
-                    .resizable()
-                    .scaledToFit()
-                    .overlay {
-                        GeometryReader { geo in
-                            DoodleCanvas(strokes: strokes, current: current)
-                                .contentShape(Rectangle())
-                                .gesture(drawGesture(in: geo.size))
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            } else if phase.error != nil {
-                Image(systemName: "photo").foregroundStyle(.white.opacity(0.5))
-            } else {
-                ProgressView().tint(.white)
-            }
-        }
-        .padding(.horizontal, 12)
-    }
-
-    private var palette: some View {
-        VStack(spacing: 18) {
-            HStack(spacing: 14) {
-                ForEach(InkColor.allCases) { option in
-                    Button {
-                        guard ink != option else { return }
-                        haptics.pick()
-                        ink = option
-                    } label: {
-                        Circle()
-                            .fill(option.color)
-                            .frame(width: 30, height: 30)
-                            .overlay(Circle().stroke(.white, lineWidth: ink == option ? 3 : 1).opacity(ink == option ? 1 : 0.4))
-                            .scaleEffect(ink == option ? 1.15 : 1)
-                            .animation(.snappy, value: ink)
-                    }
-                }
-            }
-
-            HStack(spacing: 26) {
-                ForEach(BrushSize.allCases) { size in
-                    Button {
-                        guard brush != size else { return }
-                        haptics.pick()
-                        brush = size
-                    } label: {
-                        Circle()
-                            .fill(brush == size ? ink.color : .white.opacity(0.5))
-                            .frame(width: 8 + size.rawValue * 500, height: 8 + size.rawValue * 500)
-                            .frame(width: 34, height: 34)
-                    }
-                }
-            }
-        }
-        .padding(.bottom, 24)
-    }
-
-    private func drawGesture(in size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .local)
-            .onChanged { value in
-                let point = value.location
-                let normalized = CGPoint(x: min(max(point.x / size.width, 0), 1),
-                                         y: min(max(point.y / size.height, 0), 1))
-
-                guard current != nil, let last = lastPoint, let lastTime else {
-                    current = Stroke(points: [normalized], color: ink, width: brush.rawValue)
-                    lastPoint = point
-                    self.lastTime = value.time
-                    lastAngle = nil
-                    haptics.strokeBegan(brush: brush)
-                    return
-                }
-
-                let dx = point.x - last.x, dy = point.y - last.y
-                let distance = hypot(dx, dy)
-                guard distance >= 1.5 else { return }
-                let seconds = max(value.time.timeIntervalSince(lastTime), 0.004)
-                let angle = atan2(dy, dx)
-                var turn: CGFloat = 0
-                if let lastAngle {
-                    turn = abs(angle - lastAngle)
-                    if turn > .pi { turn = 2 * .pi - turn }
-                }
-
-                current?.points.append(normalized)
-                haptics.strokeMoved(distance: distance, speed: distance / seconds, turn: turn, brush: brush)
-                lastPoint = point
-                self.lastTime = value.time
-                lastAngle = angle
-            }
-            .onEnded { _ in
-                if let current { strokes.append(current) }
-                current = nil
-                lastPoint = nil
-                lastTime = nil
-                lastAngle = nil
-                haptics.strokeEnded()
-            }
     }
 }

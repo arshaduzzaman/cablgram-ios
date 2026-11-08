@@ -229,7 +229,7 @@ private struct UserPuck: View {
     }
 }
 
-/// Google map that follows you, tilted, with the route in pink on a muted map.
+/// Google map that follows you, tilted, with the route in pink on a black-and-white map.
 private struct NavGoogleMap: UIViewRepresentable {
     let route: [CLLocationCoordinate2D]
     let location: CLLocation?
@@ -246,18 +246,11 @@ private struct NavGoogleMap: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    /// Quieter map so the pink route stands out.
-    private static let style = """
-    [{"stylers":[{"saturation":-70},{"lightness":8}]},
-     {"featureType":"poi.business","stylers":[{"visibility":"off"}]},
-     {"featureType":"transit","elementType":"labels.icon","stylers":[{"visibility":"off"}]}]
-    """
-
     func makeUIView(context: Context) -> GMSMapView {
         let options = GMSMapViewOptions()
         options.camera = GMSCameraPosition(latitude: 23.75, longitude: 90.39, zoom: 16)
         let map = GMSMapView(options: options)
-        map.mapStyle = try? GMSMapStyle(jsonString: Self.style)
+        map.mapStyle = try? GMSMapStyle(jsonString: GoogleMapsConfig.monochromeStyle)
         map.isBuildingsEnabled = true
         map.settings.compassButton = false
         map.settings.tiltGestures = false

@@ -111,6 +111,7 @@ private struct GoogleRouteMap: UIViewRepresentable {
         // Dhaka, until we know where the user or their places are.
         options.camera = GMSCameraPosition(latitude: 23.75, longitude: 90.39, zoom: 13)
         let map = GMSMapView(options: options)
+        map.mapStyle = try? GMSMapStyle(jsonString: GoogleMapsConfig.monochromeStyle)
         map.isMyLocationEnabled = true
         map.settings.myLocationButton = interactive
         map.settings.compassButton = interactive
