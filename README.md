@@ -1,10 +1,40 @@
 # Cablgram for iOS
 
-SwiftUI app with three tabs:
+SwiftUI app. Everyone signs in with Google first. The layout follows the Facebook app: a "cablgram" bar on top, icon tabs under it.
 
-- **News**: the Cablgram post feed from `https://www.cablgram.com/api/facebook-posts`, the same one the website's home page shows. Pull to refresh, scroll to load more, tap a post to open it, or share it.
-- **Walk**: reads steps from Apple Health. Steps taken since you first open the app unlock rewards, from a 5,000-step badge, through free food from partners (Uncle Bobo's chicken and a Liberty Pizza slice at 10,000 steps), up to a PlayStation 5 at 100,000 steps. Edit the prize list in `Cablgram/Walk/Rewards.swift`.
-- **Routes**: a full-screen map of your home and the places you go often (saved only on the phone). A bottom panel suggests walks from home through one or two of those places that reach your daily step goal; tap one to draw it on the map.
+- **News** (home icon): the Cablgram post feed from `https://www.cablgram.com/api/facebook-posts`, the same one the website shows. Pull to refresh, scroll for more, tap to open, or share.
+- **Walk**: everything about walking, in three sections:
+  - **Rewards**: steps from Apple Health since you joined unlock Liberty Pizza Slice and Uncle Bobo's Chicken (10,000), Smashed Chicken Burger (15,000), GTA 6 (75,000) and PlayStation 5 (100,000). Edit the list in `Cablgram/Walk/Rewards.swift`.
+  - **Routes**: map of your home and usual places, with walks that reach your daily goal.
+  - **Leaderboard**: everyone's steps, all time and today, live from Firestore.
+- **Menu**: your profile, stats, claimed rewards and sign out.
+
+## Reward photos
+
+Put each photo in `Cablgram/RewardImages/`, named after the reward id, and rebuild:
+
+| Reward | File name |
+| --- | --- |
+| Liberty Pizza Slice | `liberty-pizza.jpg` |
+| Uncle Bobo's Chicken | `unclebobos-chicken.jpg` |
+| Smashed Chicken Burger | `smashed-chicken-burger.jpg` |
+| GTA 6 | `gta-6.jpg` |
+| PlayStation 5 | `ps5.jpg` |
+
+`.png` works too. Square photos look best. Until a photo is added the card shows an icon. Only use photos you have permission to use (from the partner, or your own).
+
+## Firebase: Google sign-in and the leaderboard
+
+The app uses the same Firebase project as the website (`cablgram-6808a`).
+
+1. Firebase console → Project settings → Your apps → **Add app → iOS**, bundle id `com.cablgram.app`. Download `GoogleService-Info.plist` into `Cablgram/` (it's git-ignored).
+2. Copy `REVERSED_CLIENT_ID` from that file into `GOOGLE_REVERSED_CLIENT_ID` in `App.xcconfig` (needed for Google to return to the app).
+3. Authentication → Sign-in method → enable **Google**.
+4. Firestore → Rules: add the `walkers` block from `firestore.rules` to your existing rules. Don't replace them; the website uses the same database.
+
+Without `GoogleService-Info.plist`, debug builds show a "Skip for now" button so you can still test.
+
+Steps are sent from the phone, so a determined cheater could fake them. The rules cap the numbers, but real prize payouts need a server-side check first.
 
 ## Maps: Google, with an Apple Maps fallback
 
@@ -31,5 +61,5 @@ To run on a real iPhone, choose your team under **Signing & Capabilities**. Heal
 
 ## Not built yet
 
-- Claiming a reward is only saved on the phone. Delivering real prizes needs a backend with accounts, server-side step checks (to stop cheating), and shipping or voucher details for partners.
+- Claiming a reward is only saved on the phone. Delivering real prizes needs server-side step checks (to stop cheating) and voucher or shipping details for partners.
 - App icon (`Assets.xcassets/AppIcon`) is empty.

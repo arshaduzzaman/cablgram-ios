@@ -41,18 +41,11 @@ struct NewsView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(Date.now, format: .dateTime.weekday(.wide).day().month(.wide))
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-            HStack(spacing: 0) {
-                Text("cabl.")
-                Text("gram").foregroundStyle(.brandGradient)
-            }
-            .font(.system(size: 34, weight: .heavy, design: .rounded))
-        }
-        .padding(.top, 8)
+        Text(Date.now, format: .dateTime.weekday(.wide).day().month(.wide))
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
+            .padding(.top, 12)
     }
 
     /// Today's steps, linking to the Walk tab.
@@ -68,7 +61,7 @@ struct NewsView: View {
                     Text("\(steps.stepsToday.formatted()) steps today")
                         .font(.subheadline.weight(.semibold))
                     if let next = steps.nextReward {
-                        Text("\((next.steps - steps.totalSteps).formatted()) to go for \(next.partner) \(next.title)")
+                        Text("\((next.steps - steps.totalSteps).formatted()) to go for \(next.fullName)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)

@@ -1,42 +1,36 @@
 import SwiftUI
+import GoogleSignIn
 
 @main
 struct CablgramApp: App {
+    @StateObject private var auth: AuthStore
     @StateObject private var steps = StepStore()
+    @StateObject private var leaderboard = LeaderboardStore()
 
     init() {
+        // Firebase must be set up before AuthStore reads the current user.
+        AuthStore.configureFirebase()
         GoogleMapsConfig.activate()
+        _auth = StateObject(wrappedValue: AuthStore())
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(steps)
-                .tint(.brand)
+            Group {
+                if auth.canEnterApp {
+                    MainView()
+                } else {
+                    SignInView()
+                }
+            }
+            .environmentObject(auth)
+            .environmentObject(steps)
+            .environmentObject(leaderboard)
+            .tint(.brand)
+            .onOpenURL { url in
+                // Returns from the Google sign-in page.
+                GIDSignIn.sharedInstance.handle(url)
+            }
         }
-    }
-}
-
-enum AppTab: Hashable {
-    case news, walk, routes
-}
-
-struct ContentView: View {
-    @EnvironmentObject private var steps: StepStore
-    @State private var tab: AppTab = .news
-
-    var body: some View {
-        TabView(selection: $tab) {
-            NewsView(openWalk: { tab = .walk })
-                .tabItem { Label("News", systemImage: "newspaper.fill") }
-                .tag(AppTab.news)
-            WalkView()
-                .tabItem { Label("Walk", systemImage: "figure.walk") }
-                .tag(AppTab.walk)
-            RoutesView()
-                .tabItem { Label("Routes", systemImage: "map.fill") }
-                .tag(AppTab.routes)
-        }
-        .task { await steps.start() }
     }
 }

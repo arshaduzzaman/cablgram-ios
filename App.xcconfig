@@ -4,4 +4,8 @@
 // Copy Secrets.example.xcconfig to Secrets.xcconfig and paste your key there.
 // Without a key the app falls back to Apple Maps.
 GOOGLE_MAPS_API_KEY =
+
+// Google Sign-In callback scheme: REVERSED_CLIENT_ID from GoogleService-Info.plist.
+GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.not-configured
+
 #include? "Secrets.xcconfig"

@@ -8,9 +8,8 @@ struct WalkView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                ScreenHeader(eyebrow: "Every step counts", title: "Walk")
-
                 StepsHero()
+                    .padding(.top, 12)
 
                 if steps.access == .unavailable {
                     Label("Step counting needs Apple Health, which isn't available on this device.",
@@ -53,7 +52,7 @@ struct WalkView: View {
         .alert(item: $justClaimed) { reward in
             Alert(
                 title: Text("You earned it! 🎉"),
-                message: Text("\(reward.partner) \(reward.title) is yours. You walked \(reward.steps.formatted()) steps for it."),
+                message: Text("\(reward.fullName) is yours. You walked \(reward.steps.formatted()) steps for it."),
                 dismissButton: .default(Text("Nice"))
             )
         }
@@ -122,7 +121,7 @@ private struct StepsHero: View {
             }
 
             if let next = steps.nextReward {
-                Label("Next: \(next.partner) \(next.title)", systemImage: next.systemImage)
+                Label("Next: \(next.fullName)", systemImage: next.systemImage)
                     .font(.subheadline.weight(.semibold))
             }
         }
@@ -165,19 +164,27 @@ private struct RewardCard: View {
         let claimed = steps.isClaimed(reward)
 
         HStack(spacing: 14) {
-            Image(systemName: reward.systemImage)
-                .font(.title3)
-                .foregroundStyle(unlocked ? .white : Color.brand)
-                .frame(width: 48, height: 48)
-                .background(unlocked ? AnyShapeStyle(.brandGradient) : AnyShapeStyle(Color.brand.opacity(0.12)),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            RewardImage(reward: reward)
+                .frame(width: 76, height: 76)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(alignment: .topTrailing) {
+                    if claimed {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.title3)
+                            .foregroundStyle(.white, .green)
+                            .offset(x: 6, y: -6)
+                    }
+                }
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(reward.partner)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                if let partner = reward.partner {
+                    Text(partner)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
                 Text(reward.title)
                     .font(.headline)
+                    .lineLimit(2)
                 if !unlocked {
                     GradientProgressBar(fraction: Double(steps.totalSteps) / Double(reward.steps))
                         .padding(.top, 2)
@@ -190,13 +197,12 @@ private struct RewardCard: View {
                     .monospacedDigit()
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 4)
 
             if claimed {
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.title2)
+                Text("Claimed")
+                    .font(.caption.bold())
                     .foregroundStyle(.green)
-                    .accessibilityLabel("Claimed")
             } else if unlocked {
                 Button(action: onClaim) {
                     Text("Claim")
@@ -212,7 +218,7 @@ private struct RewardCard: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .padding(14)
+        .padding(12)
         .card()
     }
 }

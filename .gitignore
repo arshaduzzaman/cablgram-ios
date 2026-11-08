@@ -4,3 +4,4 @@ DerivedData/
 build/
 *.xcuserstate
 Secrets.xcconfig
+Cablgram/GoogleService-Info.plist

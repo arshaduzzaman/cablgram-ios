@@ -1,0 +1,27 @@
+// Firestore rules for the Cablgram app's leaderboard.
+//
+// The cablgram-6808a project is shared with the website, so DON'T replace
+// your existing rules with this file. Copy the `match /walkers/{uid}` block
+// into the rules you already have (Firebase console → Firestore → Rules).
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // One document per signed-in user: their name, photo and step totals.
+    match /walkers/{uid} {
+      // Any signed-in user can see the leaderboard.
+      allow read: if request.auth != null;
+
+      // You can only write your own entry, with sane numbers.
+      allow write: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.totalSteps is int
+        && request.resource.data.totalSteps >= 0
+        && request.resource.data.totalSteps <= 5000000
+        && request.resource.data.todaySteps is int
+        && request.resource.data.todaySteps >= 0
+        && request.resource.data.todaySteps <= 150000;
+    }
+  }
+}
