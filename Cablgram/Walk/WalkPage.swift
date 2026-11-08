@@ -20,6 +20,7 @@ struct WalkPage: View {
     @State private var addingKind: SavedPlace.Kind?
     @State private var showingMap = false
     @State private var showingLeaderboard = false
+    @State private var showingGoalPicker = false
     @State private var justClaimed: Reward?
     /// Set just after the first step count arrives, so opening the app
     /// doesn't buzz for rewards or goals that were already reached.
@@ -32,8 +33,9 @@ struct WalkPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
-                StepsHero()
-                    .padding(.top, 12)
+                GoalHero(onStartWalk: startWalk,
+                         onChangeGoal: { showingGoalPicker = true },
+                         onClaim: claim)
 
                 if steps.access == .unavailable {
                     Label("Step counting needs Apple Health, which isn't available on this device.",
@@ -120,6 +122,11 @@ struct WalkPage: View {
             .environmentObject(leaderboard)
             .tint(.brand)
             .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showingGoalPicker) {
+            GoalPicker()
+                .environmentObject(steps)
+                .presentationDetents([.medium, .large])
         }
         .alert(item: $justClaimed) { reward in
             Alert(
@@ -329,23 +336,23 @@ struct WalkPage: View {
     private var leaderboardPreview: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionTitle(title: "Leaderboard",
-                          actionTitle: leaderboard.entries.isEmpty ? nil : "See all") {
+                          actionTitle: leaderboard.ranked.isEmpty ? nil : "See all") {
                 showingLeaderboard = true
             }
 
             if let notice = LeaderboardNotice.current(auth: auth, leaderboard: leaderboard,
-                                                      isEmpty: leaderboard.entries.isEmpty,
+                                                      isEmpty: leaderboard.ranked.isEmpty,
                                                       emptyText: "No walkers yet. Start walking to take #1!") {
                 notice
             } else {
-                let top = Array(leaderboard.entries.prefix(3))
+                let top = Array(leaderboard.ranked.prefix(3))
                 let me = auth.user?.uid
                 VStack(spacing: 0) {
                     ForEach(Array(top.enumerated()), id: \.element.id) { index, entry in
                         LeaderRow(rank: index + 1, entry: entry, steps: entry.totalSteps, isMe: entry.id == me)
                         if index < top.count - 1 { Divider().padding(.leading, 64) }
                     }
-                    if let myRank, myRank > 3, let mine = leaderboard.entries.first(where: { $0.id == me }) {
+                    if let myRank, myRank > 3, let mine = leaderboard.ranked.first(where: { $0.id == me }) {
                         HStack {
                             Spacer()
                             Image(systemName: "ellipsis").foregroundStyle(.tertiary)
@@ -372,13 +379,20 @@ struct WalkPage: View {
 
             VStack(spacing: 0) {
                 ForEach(Reward.all) { reward in
-                    RewardCard(reward: reward) {
-                        steps.claim(reward)
-                        justClaimed = reward
-                    }
-                    .hairline(leading: reward.id == Reward.all.last?.id ? 0 : 72)
+                    RewardCard(reward: reward) { claim(reward) }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard !steps.isClaimed(reward), reward.id != steps.goalReward?.id else { return }
+                            Haptics.select()
+                            withAnimation(.snappy) { steps.setGoal(reward) }
+                        }
+                        .hairline(leading: reward.id == Reward.all.last?.id ? 0 : 72)
                 }
             }
+
+            Text("Tap a reward to make it your goal.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Text("Steps count from \(steps.joinDate.formatted(date: .abbreviated, time: .omitted)), when you joined.")
                 .font(.caption)
@@ -387,6 +401,20 @@ struct WalkPage: View {
     }
 
     // MARK: - Helpers
+
+    /// "Start a walk": open the map, or ask for home first if it isn't set.
+    private func startWalk() {
+        if places.home == nil {
+            addingKind = .home
+        } else {
+            showingMap = true
+        }
+    }
+
+    private func claim(_ reward: Reward) {
+        steps.claim(reward)
+        justClaimed = reward
+    }
 
     private func prompt(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
         Button {

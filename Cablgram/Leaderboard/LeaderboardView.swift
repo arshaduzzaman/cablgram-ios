@@ -13,7 +13,7 @@ struct LeaderboardView: View {
     @State private var period: Period = .allTime
 
     private var rows: [LeaderboardEntry] {
-        period == .allTime ? leaderboard.entries : leaderboard.today
+        period == .allTime ? leaderboard.ranked : leaderboard.today
     }
 
     private func steps(of entry: LeaderboardEntry) -> Int {
@@ -111,11 +111,15 @@ struct LeaderboardNotice: View {
 
     @MainActor
     static func current(auth: AuthStore, leaderboard: LeaderboardStore, isEmpty: Bool, emptyText: String) -> LeaderboardNotice? {
-        if !AuthStore.isConfigured || auth.user == nil {
+        var hasSamples = false
+        #if DEBUG
+        hasSamples = LeaderboardStore.showSamples
+        #endif
+        if (!AuthStore.isConfigured || auth.user == nil) && !hasSamples {
             return LeaderboardNotice(text: "Sign in with Google to join the leaderboard.",
                                      icon: "person.crop.circle.badge.exclamationmark")
         }
-        if let error = leaderboard.errorMessage {
+        if let error = leaderboard.errorMessage, !hasSamples {
             return LeaderboardNotice(text: "Couldn't load the leaderboard: \(error)", icon: "exclamationmark.triangle.fill")
         }
         if isEmpty {

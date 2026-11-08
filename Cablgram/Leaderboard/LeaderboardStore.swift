@@ -88,15 +88,52 @@ final class LeaderboardStore: ObservableObject {
         }
     }
 
+    /// Everyone to show, highest total first. In test builds this can include
+    /// made-up sample walkers; they're never uploaded and never in release builds.
+    var ranked: [LeaderboardEntry] {
+        #if DEBUG
+        if Self.showSamples {
+            return (entries + Self.sampleWalkers).sorted { $0.totalSteps > $1.totalSteps }
+        }
+        #endif
+        return entries
+    }
+
     /// 1-based all-time rank of a user, if they're in the top 100.
     func rank(of uid: String?) -> Int? {
         guard let uid else { return nil }
-        return entries.firstIndex { $0.id == uid }.map { $0 + 1 }
+        return ranked.firstIndex { $0.id == uid }.map { $0 + 1 }
     }
 
     /// Top walkers today (only people who've synced today).
     var today: [LeaderboardEntry] {
         let key = Self.todayKey
-        return entries.filter { $0.day == key && $0.todaySteps > 0 }.sorted { $0.todaySteps > $1.todaySteps }
+        return ranked.filter { $0.day == key && $0.todaySteps > 0 }.sorted { $0.todaySteps > $1.todaySteps }
     }
+
+    #if DEBUG
+    static let sampleWalkersKey = "debug.sampleWalkers"
+
+    /// Sample walkers on/off (Menu, debug builds). On by default.
+    static var showSamples: Bool {
+        UserDefaults.standard.object(forKey: sampleWalkersKey) as? Bool ?? true
+    }
+
+    /// Made-up walkers with common Bangladeshi names, for trying the
+    /// leaderboard before real users join. Test builds only; not real people.
+    static let sampleWalkers: [LeaderboardEntry] = [
+        ("Tanvir Ahmed", 184_250, 12_480), ("Nusrat Jahan", 171_900, 9_820),
+        ("Rafiqul Islam", 158_340, 11_050), ("Farhana Akter", 142_760, 7_640),
+        ("Sabbir Hossain", 129_510, 13_210), ("Sumaiya Rahman", 118_030, 6_930),
+        ("Arif Chowdhury", 104_870, 8_410), ("Tasnim Haque", 93_220, 10_370),
+        ("Mahfuz Alam", 81_690, 5_280), ("Shaila Sultana", 72_450, 7_960),
+        ("Imran Kabir", 61_380, 4_120), ("Rumana Begum", 52_910, 6_340),
+        ("Fahim Mahmud", 43_770, 3_890), ("Jannatul Ferdous", 35_160, 5_510),
+        ("Rakib Uddin", 27_480, 2_740), ("Sadia Islam", 19_620, 4_380),
+        ("Nayeem Hasan", 12_350, 1_970), ("Mim Akter", 6_840, 2_610),
+    ].enumerated().map { index, walker in
+        LeaderboardEntry(id: "sample-\(index)", name: walker.0, photoURL: nil,
+                         totalSteps: walker.1, todaySteps: walker.2, day: todayKey)
+    }
+    #endif
 }

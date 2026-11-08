@@ -16,6 +16,8 @@ final class StepStore: ObservableObject {
     /// so the UI can tell real progress apart from the initial load.
     @Published private(set) var hasLoaded = false
     @Published private(set) var claimedRewardIDs: Set<String>
+    /// The reward the user picked to aim for. `nil` means "the next one".
+    @Published private(set) var goalRewardID: String?
 
     private let health = HKHealthStore()
     private let stepType = HKQuantityType(.stepCount)
@@ -37,6 +39,7 @@ final class StepStore: ObservableObject {
             defaults.set(joinDate, forKey: "walk.joinDate")
         }
         claimedRewardIDs = Set(defaults.stringArray(forKey: "walk.claimed") ?? [])
+        goalRewardID = defaults.string(forKey: "walk.goalReward")
         #if DEBUG
         testSteps = defaults.integer(forKey: "walk.testSteps")
         #endif
@@ -53,6 +56,27 @@ final class StepStore: ObservableObject {
 
     var unlockedCount: Int {
         Reward.all.filter { totalSteps >= $0.steps }.count
+    }
+
+    /// The reward shown at the top of the Walk page: the one the user picked,
+    /// or the first one not yet claimed.
+    var goalReward: Reward? {
+        if let id = goalRewardID, let picked = Reward.all.first(where: { $0.id == id }), !isClaimed(picked) {
+            return picked
+        }
+        return Reward.all.first { !isClaimed($0) }
+    }
+
+    func setGoal(_ reward: Reward) {
+        goalRewardID = reward.id
+        defaults.set(reward.id, forKey: "walk.goalReward")
+    }
+
+    /// Average steps a day since joining.
+    var dailyPace: Int {
+        let calendar = Calendar.current
+        let days = (calendar.dateComponents([.day], from: calendar.startOfDay(for: joinDate), to: .now).day ?? 0) + 1
+        return totalSteps / max(days, 1)
     }
 
     var nextReward: Reward? {

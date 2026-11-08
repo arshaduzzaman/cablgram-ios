@@ -7,6 +7,9 @@ struct MenuView: View {
     @EnvironmentObject private var leaderboard: LeaderboardStore
 
     @AppStorage(Haptics.enabledKey) private var hapticsOn = true
+    #if DEBUG
+    @AppStorage(LeaderboardStore.sampleWalkersKey) private var sampleWalkers = true
+    #endif
 
     private var claimed: [Reward] { Reward.all.filter(steps.isClaimed) }
 
@@ -61,6 +64,24 @@ struct MenuView: View {
                 .onChange(of: hapticsOn) { _, on in
                     if on { Haptics.success() }
                 }
+
+                #if DEBUG
+                Toggle(isOn: $sampleWalkers) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sample walkers").font(.headline)
+                        Text("Test builds only. Never uploaded or shown in the App Store version.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .tint(.brand)
+                .padding(16)
+                .card(cornerRadius: 16)
+                .onChange(of: sampleWalkers) { _, _ in
+                    Haptics.select()
+                    leaderboard.objectWillChange.send()
+                }
+                #endif
 
                 Button(role: .destructive) {
                     Haptics.warning()

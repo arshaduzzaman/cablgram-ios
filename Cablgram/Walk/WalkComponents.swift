@@ -91,6 +91,12 @@ struct RewardCard: View {
                 Text(reward.fullName)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
+                if reward.id == steps.goalReward?.id && !claimed {
+                    Text("YOUR GOAL")
+                        .font(.caption2.weight(.bold))
+                        .tracking(0.5)
+                        .foregroundStyle(Color.brand)
+                }
                 if !unlocked {
                     GradientProgressBar(fraction: Double(steps.totalSteps) / Double(reward.steps))
                         .padding(.vertical, 3)
