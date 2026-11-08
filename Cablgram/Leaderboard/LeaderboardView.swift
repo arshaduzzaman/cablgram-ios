@@ -48,9 +48,7 @@ struct LeaderboardView: View {
                                 .font(.subheadline)
                                 .opacity(0.85)
                         }
-                        .padding(14)
-                        .foregroundStyle(.white)
-                        .background(.brandGradient, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .padding(.vertical, 4)
                     }
 
                     VStack(spacing: 0) {
@@ -65,7 +63,7 @@ struct LeaderboardView: View {
             }
             .padding(16)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Color(.systemBackground))
     }
 }
 
@@ -78,9 +76,9 @@ struct LeaderRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(rank <= 3 ? ["🥇", "🥈", "🥉"][rank - 1] : "\(rank)")
-                .font(rank <= 3 ? .title3 : .subheadline.weight(.bold).monospacedDigit())
-                .foregroundStyle(.secondary)
+            Text("\(rank)")
+                .font(.subheadline.weight(.bold).monospacedDigit())
+                .foregroundStyle(rank <= 3 ? Color.brand : .secondary)
                 .frame(width: 28)
             Avatar(url: entry.photoURL, name: entry.name, size: 36)
             Text(isMe ? "\(entry.name) (you)" : entry.name)

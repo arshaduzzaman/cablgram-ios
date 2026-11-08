@@ -6,36 +6,21 @@ struct SignInView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [.brand, .brandOrange], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
+            Color.brand.ignoresSafeArea()
 
-            VStack(spacing: 28) {
+            VStack(spacing: 0) {
                 Spacer()
 
-                Text("cablgram")
-                    .font(.system(size: 52, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.white)
-
-                VStack(spacing: 8) {
-                    Text("News that moves you.")
-                        .font(.title3.weight(.semibold))
-                    Text("Read the news, walk, climb the leaderboard and win food, games and a PS5.")
-                        .font(.subheadline)
+                VStack(spacing: 12) {
+                    CablgramLogo(size: 64)
+                        .padding(.bottom, 8)
+                    Text("Read the news. Walk. Win food, games and a PS5.")
+                        .font(.body)
                         .multilineTextAlignment(.center)
                         .opacity(0.9)
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, 32)
-
-                HStack(spacing: 14) {
-                    ForEach(["newspaper.fill", "figure.walk", "trophy.fill", "gamecontroller.fill"], id: \.self) { icon in
-                        Image(systemName: icon)
-                            .font(.title3)
-                            .foregroundStyle(.white)
-                            .frame(width: 52, height: 52)
-                            .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    }
-                }
 
                 Spacer()
 
@@ -44,22 +29,18 @@ struct SignInView: View {
                         Haptics.press()
                         Task { await auth.signInWithGoogle() }
                     } label: {
-                        HStack(spacing: 10) {
+                        ZStack {
                             if auth.isWorking {
-                                ProgressView()
+                                ProgressView().tint(.black)
                             } else {
-                                Text("G")
-                                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.brandGradient)
+                                Text("Continue with Google")
+                                    .font(.headline)
                             }
-                            Text("Continue with Google")
-                                .font(.headline)
                         }
                         .foregroundStyle(.black)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
+                        .frame(height: 54)
                         .background(.white, in: Capsule())
-                        .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
                     }
                     .disabled(auth.isWorking)
 

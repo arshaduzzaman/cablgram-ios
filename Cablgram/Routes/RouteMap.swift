@@ -37,7 +37,7 @@ struct PlacePin: View {
             .font(.system(size: 13, weight: .bold))
             .foregroundStyle(.white)
             .frame(width: 32, height: 32)
-            .background(kind == .home ? AnyShapeStyle(.brandGradient) : AnyShapeStyle(Color.indigo), in: Circle())
+            .background(kind == .home ? AnyShapeStyle(Color.brand) : AnyShapeStyle(Color.black), in: Circle())
             .overlay(Circle().stroke(.white, lineWidth: 2.5))
             .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
             .padding(5)

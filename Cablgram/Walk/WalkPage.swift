@@ -31,7 +31,7 @@ struct WalkPage: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+            VStack(alignment: .leading, spacing: 32) {
                 StepsHero()
                     .padding(.top, 12)
 
@@ -56,7 +56,7 @@ struct WalkPage: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 32)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Color(.systemBackground))
         .refreshable {
             Haptics.soft()
             await steps.refresh()
@@ -135,10 +135,10 @@ struct WalkPage: View {
     private var goalCard: some View {
         HStack(spacing: 14) {
             ZStack {
-                Circle().stroke(Color.brand.opacity(0.15), lineWidth: 6)
+                Circle().stroke(Color(.systemFill), lineWidth: 5)
                 Circle()
                     .trim(from: 0, to: min(Double(steps.stepsToday) / Double(dailyGoal), 1))
-                    .stroke(.brandGradient, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .stroke(Color.brand, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(.spring(duration: 0.5), value: steps.stepsToday)
                 Image(systemName: stepsNeeded == 0 ? "checkmark" : "flag.fill")
@@ -186,7 +186,7 @@ struct WalkPage: View {
 
     private var walkIdeas: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Walk ideas", icon: "map.fill",
+            SectionTitle(title: "Walk ideas",
                           actionTitle: places.home == nil ? nil : "Full map") {
                 showingMap = true
             }
@@ -200,7 +200,7 @@ struct WalkPage: View {
                 } label: {
                     RouteMap(places: places.places, walk: selected, topInset: 0, interactive: false)
                         .frame(height: 190)
-                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay(alignment: .bottomTrailing) {
                             Label("Open map", systemImage: "arrow.up.left.and.arrow.down.right")
                                 .font(.caption.bold())
@@ -209,7 +209,6 @@ struct WalkPage: View {
                                 .background(.regularMaterial, in: Capsule())
                                 .padding(10)
                         }
-                        .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Open the full map")
@@ -280,7 +279,7 @@ struct WalkPage: View {
                             .font(.subheadline.weight(.medium))
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(Color(.secondarySystemGroupedBackground), in: Capsule())
+                            .background(Color(.secondarySystemBackground), in: Capsule())
                             .contextMenu {
                                 Button(role: .destructive) {
                                     Haptics.warning()
@@ -329,7 +328,7 @@ struct WalkPage: View {
 
     private var leaderboardPreview: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Leaderboard", icon: "trophy.fill",
+            SectionTitle(title: "Leaderboard",
                           actionTitle: leaderboard.entries.isEmpty ? nil : "See all") {
                 showingLeaderboard = true
             }
@@ -356,7 +355,7 @@ struct WalkPage: View {
                         LeaderRow(rank: myRank, entry: mine, steps: mine.totalSteps, isMe: true)
                     }
                 }
-                .card(cornerRadius: 18)
+                .padding(.horizontal, -14)
                 .onTapGesture {
                     Haptics.tap()
                     showingLeaderboard = true
@@ -369,14 +368,15 @@ struct WalkPage: View {
 
     private var rewards: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Rewards", icon: "gift.fill")
+            SectionTitle(title: "Rewards")
 
-            VStack(spacing: 12) {
+            VStack(spacing: 0) {
                 ForEach(Reward.all) { reward in
                     RewardCard(reward: reward) {
                         steps.claim(reward)
                         justClaimed = reward
                     }
+                    .hairline(leading: reward.id == Reward.all.last?.id ? 0 : 72)
                 }
             }
 
@@ -422,48 +422,4 @@ struct WalkPage: View {
         .card()
     }
     #endif
-}
-
-/// Section title with an icon and an optional link on the right.
-private struct SectionHeader: View {
-    let title: String
-    let icon: String
-    var actionTitle: String?
-    var action: () -> Void = {}
-
-    var body: some View {
-        HStack {
-            Label(title, systemImage: icon)
-                .font(.title3.bold())
-                .labelStyle(SectionLabelStyle())
-            Spacer()
-            if let actionTitle {
-                Button {
-                    Haptics.tap()
-                    action()
-                } label: {
-                    HStack(spacing: 3) {
-                        Text(actionTitle)
-                        Image(systemName: "chevron.right").font(.caption.bold())
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.brand)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-}
-
-private struct SectionLabelStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 8) {
-            configuration.icon
-                .font(.subheadline.bold())
-                .foregroundStyle(.white)
-                .frame(width: 28, height: 28)
-                .background(.brandGradient, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            configuration.title
-        }
-    }
 }

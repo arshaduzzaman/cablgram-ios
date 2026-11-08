@@ -48,7 +48,7 @@ struct AddPlaceView: View {
                 }
                 .padding(16)
             }
-            .background(Color(.systemGroupedBackground))
+            .background(Color(.systemBackground))
             .navigationTitle("Add a place")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -79,7 +79,7 @@ struct AddPlaceView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .foregroundStyle(isOn ? .white : .primary)
-                        .background(isOn ? AnyShapeStyle(.brandGradient) : AnyShapeStyle(Color(.secondarySystemGroupedBackground)),
+                        .background(isOn ? AnyShapeStyle(Color.brand) : AnyShapeStyle(Color(.secondarySystemBackground)),
                                     in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .buttonStyle(.plain)
@@ -98,7 +98,7 @@ struct AddPlaceView: View {
             if isSearching { ProgressView() }
         }
         .padding(14)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     @ViewBuilder

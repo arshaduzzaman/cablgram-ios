@@ -30,6 +30,12 @@ struct RoutesView: View {
                 RouteMap(places: places.places, walk: selected, bottomInset: panelHeight)
                     .ignoresSafeArea(edges: .top)
 
+                // Pink strip behind the status bar, so its white text stays readable.
+                Color.clear
+                    .frame(height: 0)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.brand.ignoresSafeArea(edges: .top))
+
                 topBar
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -72,7 +78,7 @@ struct RoutesView: View {
                     Circle().stroke(Color.brand.opacity(0.2), lineWidth: 4)
                     Circle()
                         .trim(from: 0, to: min(Double(steps.stepsToday) / Double(dailyGoal), 1))
-                        .stroke(.brandGradient, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        .stroke(Color.brand, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                 }
                 .frame(width: 26, height: 26)
@@ -100,7 +106,7 @@ struct RoutesView: View {
                     .font(.headline)
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(.brandGradient, in: Circle())
+                    .background(Color.brand, in: Circle())
                     .shadow(color: Color.brand.opacity(0.35), radius: 8, y: 3)
             }
             .accessibilityLabel("Add a place")
@@ -206,7 +212,7 @@ struct SuggestionCard: View {
 
             HStack(spacing: 6) {
                 if reachesGoal {
-                    tag("Reaches your goal", foreground: .white, background: AnyShapeStyle(.brandGradient))
+                    tag("Reaches your goal", foreground: .white, background: AnyShapeStyle(Color.brand))
                 }
                 if walk.isEstimate {
                     tag("Estimated", foreground: .secondary, background: AnyShapeStyle(Color(.tertiarySystemFill)))
@@ -216,7 +222,7 @@ struct SuggestionCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSelected ? Color.brand.opacity(0.08) : Color(.secondarySystemGroupedBackground),
+        .background(isSelected ? Color.brand.opacity(0.08) : Color(.secondarySystemBackground),
                     in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)

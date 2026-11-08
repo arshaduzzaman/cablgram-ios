@@ -78,7 +78,7 @@ struct MenuView: View {
             }
             .padding(16)
         }
-        .background(Color(.systemGroupedBackground))
+        .background(Color(.systemBackground))
     }
 
     private func stat(_ value: String, _ label: String) -> some View {

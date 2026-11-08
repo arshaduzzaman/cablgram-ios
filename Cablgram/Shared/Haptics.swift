@@ -28,6 +28,12 @@ enum Haptics {
         mediumImpact.impactOccurred()
     }
 
+    /// Sharp smack for slapping a post.
+    static func slap() {
+        guard isEnabled else { return }
+        rigidImpact.impactOccurred(intensity: 1.0)
+    }
+
     /// Gentle bump, for panels opening, closing or refreshing.
     static func soft() {
         guard isEnabled else { return }

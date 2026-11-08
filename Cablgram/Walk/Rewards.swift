@@ -58,11 +58,10 @@ struct RewardImage: View {
                 .scaledToFill()
         } else {
             ZStack {
-                LinearGradient(colors: [Color.brand.opacity(0.18), Color.brandOrange.opacity(0.18)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                Color(.secondarySystemBackground)
                 Image(systemName: reward.systemImage)
-                    .font(.system(size: 34, weight: .semibold))
-                    .foregroundStyle(.brandGradient)
+                    .font(.system(size: 26, weight: .regular))
+                    .foregroundStyle(.secondary)
             }
         }
     }

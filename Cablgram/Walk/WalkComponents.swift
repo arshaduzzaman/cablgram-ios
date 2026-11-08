@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Gradient card with the step ring and today's numbers.
+/// Step ring with your total, plus today's steps and what's next.
 struct StepsHero: View {
     @EnvironmentObject private var steps: StepStore
 
@@ -11,70 +11,67 @@ struct StepsHero: View {
     }
 
     var body: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 22) {
             ZStack {
                 Circle()
-                    .stroke(.white.opacity(0.25), lineWidth: 16)
+                    .stroke(Color(.systemFill), lineWidth: 10)
                 Circle()
                     .trim(from: 0, to: progress)
-                    .stroke(.white, style: StrokeStyle(lineWidth: 16, lineCap: .round))
+                    .stroke(Color.brand, style: StrokeStyle(lineWidth: 10, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(.spring(duration: 0.6), value: progress)
-                VStack(spacing: 0) {
+                VStack(spacing: 2) {
                     Text(steps.totalSteps.formatted())
-                        .font(.system(size: 44, weight: .bold, design: .rounded))
+                        .font(.system(size: 46, weight: .bold))
                         .monospacedDigit()
                         .contentTransition(.numericText())
                     Text("total steps")
-                        .font(.subheadline.weight(.medium))
-                        .opacity(0.85)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 190, height: 190)
+            .frame(width: 184, height: 184)
 
-            HStack(spacing: 10) {
-                StatPill(value: steps.stepsToday.formatted(), label: "Today")
+            HStack(spacing: 0) {
+                Stat(value: steps.stepsToday.formatted(), label: "Today")
+                Rectangle().fill(Color(.separator)).frame(width: 1 / 3, height: 34)
                 if let next = steps.nextReward {
-                    StatPill(value: (next.steps - steps.totalSteps).formatted(), label: "To next reward")
+                    Stat(value: (next.steps - steps.totalSteps).formatted(), label: "To next reward")
                 } else {
-                    StatPill(value: "All", label: "Rewards unlocked")
+                    Stat(value: "All", label: "Rewards unlocked")
                 }
             }
 
             if let next = steps.nextReward {
-                Label("Next: \(next.fullName)", systemImage: next.systemImage)
-                    .font(.subheadline.weight(.semibold))
+                Text("Next up: **\(next.fullName)**")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         }
-        .foregroundStyle(.white)
-        .padding(22)
         .frame(maxWidth: .infinity)
-        .background(.brandGradient, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .shadow(color: Color.brand.opacity(0.3), radius: 18, y: 8)
+        .padding(.vertical, 8)
     }
 }
 
-private struct StatPill: View {
+private struct Stat: View {
     let value: String
     let label: String
 
     var body: some View {
         VStack(spacing: 2) {
             Text(value)
-                .font(.title3.bold().monospacedDigit())
+                .font(.title2.weight(.semibold).monospacedDigit())
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             Text(label)
-                .font(.caption2.weight(.semibold))
-                .textCase(.uppercase)
-                .opacity(0.85)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
+/// One reward as a flat row: photo, name, progress, and Claim when unlocked.
 struct RewardCard: View {
     @EnvironmentObject private var steps: StepStore
     let reward: Reward
@@ -86,34 +83,22 @@ struct RewardCard: View {
 
         HStack(spacing: 14) {
             RewardImage(reward: reward)
-                .frame(width: 76, height: 76)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(alignment: .topTrailing) {
-                    if claimed {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.title3)
-                            .foregroundStyle(.white, .green)
-                            .offset(x: 6, y: -6)
-                    }
-                }
+                .frame(width: 58, height: 58)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .opacity(unlocked || claimed ? 1 : 0.9)
 
-            VStack(alignment: .leading, spacing: 5) {
-                if let partner = reward.partner {
-                    Text(partner)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-                Text(reward.title)
-                    .font(.headline)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(reward.fullName)
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
                 if !unlocked {
                     GradientProgressBar(fraction: Double(steps.totalSteps) / Double(reward.steps))
-                        .padding(.top, 2)
+                        .padding(.vertical, 3)
                 }
                 Text(unlocked
                      ? "\(reward.steps.formatted()) steps"
-                     : "\(steps.totalSteps.formatted()) / \(reward.steps.formatted()) steps")
-                    .font(.caption)
+                     : "\(steps.totalSteps.formatted()) of \(reward.steps.formatted()) steps")
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
@@ -122,27 +107,27 @@ struct RewardCard: View {
 
             if claimed {
                 Text("Claimed")
-                    .font(.caption.bold())
-                    .foregroundStyle(.green)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
             } else if unlocked {
                 Button {
                     Haptics.celebrate()
                     onClaim()
                 } label: {
                     Text("Claim")
-                        .font(.subheadline.bold())
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(.brandGradient, in: Capsule())
+                        .padding(.vertical, 7)
+                        .background(Color.brand, in: Capsule())
                 }
                 .buttonStyle(.plain)
             } else {
-                Image(systemName: "lock.fill")
+                Image(systemName: "lock")
+                    .font(.footnote)
                     .foregroundStyle(.tertiary)
             }
         }
-        .padding(12)
-        .card()
+        .padding(.vertical, 12)
     }
 }
