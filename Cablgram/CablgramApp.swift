@@ -20,6 +20,8 @@ struct ContentView: View {
                 .tabItem { Label("News", systemImage: "newspaper.fill") }
             WalkView()
                 .tabItem { Label("Walk", systemImage: "figure.walk") }
+            RoutesView()
+                .tabItem { Label("Routes", systemImage: "map.fill") }
         }
     }
 }
