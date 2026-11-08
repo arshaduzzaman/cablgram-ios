@@ -92,7 +92,10 @@ private struct TopBar: View {
 
     var body: some View {
         HStack {
-            CablgramLogo(size: 19)
+            Text("cablgram")
+                .font(.wordmark(28))
+                .tracking(-0.8)
+                .foregroundStyle(.white)
             Spacer()
             Button(action: onProfile) {
                 Avatar(url: auth.user?.photoURL, name: auth.displayName, size: 32)

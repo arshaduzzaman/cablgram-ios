@@ -224,14 +224,17 @@ private struct SlapButton: View {
     }
 }
 
-/// Pink circle with a white Helvetica "c", Cablgram's avatar in the feed.
+/// Cablgram's profile picture in the feed (Assets: CablgramAvatar).
 struct CablgramAvatar: View {
     var size: CGFloat = 36
 
     var body: some View {
-        CablgramLogo(size: size * 0.27)
+        Image("CablgramAvatar")
+            .resizable()
+            .scaledToFill()
             .frame(width: size, height: size)
-            .background(Color.brand, in: Circle())
+            .clipShape(Circle())
+            .overlay(Circle().stroke(Color(.separator).opacity(0.5), lineWidth: 1 / 3))
     }
 }
 
