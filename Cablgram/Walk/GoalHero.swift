@@ -8,6 +8,7 @@ struct GoalHero: View {
     let onStartWalk: () -> Void
     let onChangeGoal: () -> Void
     let onClaim: (Reward) -> Void
+    var onOpenLeaderboard: () -> Void = {}
 
     /// Average walking cadence, used for the time estimate.
     private let stepsPerMinute = 100.0
@@ -75,7 +76,6 @@ struct GoalHero: View {
 
     private func progress(_ goal: Reward) -> some View {
         let remaining = max(goal.steps - steps.totalSteps, 0)
-        let fraction = min(Double(steps.totalSteps) / Double(goal.steps), 1)
         let pace = steps.dailyPace
         let days = pace >= 500 ? Int((Double(remaining) / Double(pace)).rounded(.up)) : nil
         let minutes = Int((Double(remaining) / stepsPerMinute).rounded())
@@ -86,50 +86,22 @@ struct GoalHero: View {
                     Text(remaining.formatted())
                         .font(.system(size: 46, weight: .bold))
                         .monospacedDigit()
-                        .contentTransition(.numericText())
+                        .contentTransition(.numericText(value: Double(remaining)))
+                        .animation(.smooth(duration: 0.8), value: remaining)
                     Text("steps to go")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
 
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color(.systemFill))
-                        Capsule()
-                            .fill(Color.brand)
-                            .frame(width: max(10, geo.size.width * fraction))
-                            .animation(.spring(duration: 0.6), value: fraction)
-                    }
-                }
-                .frame(height: 10)
-
-                HStack {
-                    Text("\(steps.totalSteps.formatted()) of \(goal.steps.formatted()) steps")
-                    Spacer()
-                    Text("\(Int(fraction * 100))%")
-                        .fontWeight(.semibold)
-                        .foregroundStyle(Color.brand)
-                }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
+                RaceTrack(goal: goal, onOpenLeaderboard: onOpenLeaderboard)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                if let days {
-                    Label {
-                        Text(days <= 1
-                             ? "You could get it **today**"
-                             : "About **\(days) days** at your pace of \(pace.formatted()) a day")
-                    } icon: {
-                        Image(systemName: "calendar").foregroundStyle(Color.brand)
-                    }
-                }
-                Label {
-                    Text("That's roughly **\(Self.duration(minutes))** of walking")
-                } icon: {
-                    Image(systemName: "clock").foregroundStyle(Color.brand)
-                }
+            Label {
+                Text(days.map { $0 <= 1 ? "Roughly **\(Self.duration(minutes))** of walking. You could get it **today**"
+                                         : "Roughly **\(Self.duration(minutes))** of walking, about **\($0) days** at your pace" }
+                     ?? "Roughly **\(Self.duration(minutes))** of walking to get it")
+            } icon: {
+                Image(systemName: "clock").foregroundStyle(Color.brand)
             }
             .font(.subheadline)
 

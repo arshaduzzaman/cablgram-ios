@@ -33,7 +33,8 @@ struct WalkPage: View {
             VStack(alignment: .leading, spacing: 32) {
                 GoalHero(onStartWalk: startWalk,
                          onChangeGoal: { showingGoalPicker = true },
-                         onClaim: claim)
+                         onClaim: claim,
+                         onOpenLeaderboard: { showingLeaderboard = true })
 
                 if steps.access == .unavailable {
                     Label("Step counting needs Apple Health, which isn't available on this device.",
@@ -305,6 +306,7 @@ struct WalkPage: View {
                     }
                 }
                 .padding(.horizontal, -14)
+                .animation(.smooth(duration: 0.6), value: leaderboard.ranked.prefix(3).map(\.id))
                 .onTapGesture {
                     Haptics.tap()
                     showingLeaderboard = true

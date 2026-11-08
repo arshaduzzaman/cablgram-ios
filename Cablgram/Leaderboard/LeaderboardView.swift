@@ -59,6 +59,7 @@ struct LeaderboardView: View {
                         }
                     }
                     .card(cornerRadius: 18)
+                    .animation(.smooth(duration: 0.6), value: rows.map(\.id))
                 }
             }
             .padding(16)
@@ -87,6 +88,8 @@ struct LeaderRow: View {
             Spacer()
             Text(steps.formatted())
                 .font(.subheadline.weight(.semibold).monospacedDigit())
+                .contentTransition(.numericText(value: Double(steps)))
+                .animation(.smooth(duration: 0.8), value: steps)
                 .foregroundStyle(isMe ? Color.brand : .primary)
         }
         .padding(.horizontal, 14)

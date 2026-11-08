@@ -41,6 +41,13 @@ final class StepStore: ObservableObject {
         claimedRewardIDs = Set(defaults.stringArray(forKey: "walk.claimed") ?? [])
         goalRewardID = defaults.string(forKey: "walk.goalReward")
         #if DEBUG
+        // `-resetClaims` launch argument: forget claimed rewards on this phone (test builds only).
+        if ProcessInfo.processInfo.arguments.contains("-resetClaims") {
+            claimedRewardIDs = []
+            defaults.removeObject(forKey: "walk.claimed")
+        }
+        #endif
+        #if DEBUG
         testSteps = defaults.integer(forKey: "walk.testSteps")
         #endif
     }

@@ -103,7 +103,8 @@ struct NewsView: View {
 /// draw buttons, and the drawings people left, like a Threads post.
 ///
 /// Press and hold the photo to draw on it right there; the same touch keeps
-/// drawing. Post adds the drawing under the post.
+/// drawing, and scrolling is never blocked unless you're holding still.
+/// Post adds the drawing under the post.
 private struct PostRow: View {
     let post: NewsPost
     let slapCount: Int
@@ -125,8 +126,6 @@ private struct PostRow: View {
     @State private var lastPoint: CGPoint?
     @State private var lastTime: Date?
     @State private var lastAngle: CGFloat?
-    /// Which gesture owns the stroke under the finger (hold or plain drag).
-    @State private var strokeOwner: Int?
 
     private let brush = BrushSize.medium
 
@@ -207,16 +206,14 @@ private struct PostRow: View {
             case .success(let image):
                 image.resizable().scaledToFit()
                     .overlay {
-                        GeometryReader { geo in
-                            ZStack {
-                                DoodleCanvas(strokes: isDrawing ? draft : (shownComment?.strokes ?? []),
-                                             current: current)
-                                Color.clear
-                                    .contentShape(Rectangle())
-                                    .gesture(holdToDraw(in: geo.size))
-                                    .simultaneousGesture(dragToDraw(in: geo.size), including: isDrawing ? .all : .none)
-                                    .simultaneousGesture(TapGesture(count: 2).onEnded { doubleTapSlap() })
-                            }
+                        ZStack {
+                            DoodleCanvas(strokes: isDrawing ? draft : (shownComment?.strokes ?? []),
+                                         current: current)
+                            DrawTouchLayer(isDrawing: isDrawing,
+                                           onHoldBegan: { if !isDrawing { beginDrawing() } },
+                                           onStroke: { point, size, time in continueStroke(at: point, time: time, in: size) },
+                                           onStrokeEnded: endStroke,
+                                           onDoubleTap: doubleTapSlap)
                         }
                     }
                     .overlay {
@@ -377,37 +374,6 @@ private struct PostRow: View {
 
     // MARK: - Drawing
 
-    /// Hold for a moment, then the same touch draws.
-    private func holdToDraw(in size: CGSize) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.3, maximumDistance: 12)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
-            .onChanged { value in
-                guard case .second(true, let drag) = value else { return }
-                if !isDrawing { beginDrawing() }
-                guard strokeOwner == nil || strokeOwner == 0 else { return }
-                if let drag {
-                    strokeOwner = 0
-                    continueStroke(at: drag.location, time: drag.time, in: size)
-                }
-            }
-            .onEnded { _ in
-                if strokeOwner == 0 { endStroke() }
-            }
-    }
-
-    /// While in draw mode, any touch draws straight away.
-    private func dragToDraw(in size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .local)
-            .onChanged { value in
-                guard isDrawing, strokeOwner == nil || strokeOwner == 1 else { return }
-                strokeOwner = 1
-                continueStroke(at: value.location, time: value.time, in: size)
-            }
-            .onEnded { _ in
-                if strokeOwner == 1 { endStroke() }
-            }
-    }
-
     private func beginDrawing() {
         haptics.pickUp()
         draft = []
@@ -448,14 +414,12 @@ private struct PostRow: View {
         lastPoint = nil
         lastTime = nil
         lastAngle = nil
-        strokeOwner = nil
         haptics.strokeEnded()
     }
 
     private func resetDraft() {
         draft = []
         current = nil
-        strokeOwner = nil
         haptics.stop()
     }
 

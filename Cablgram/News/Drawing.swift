@@ -1,5 +1,7 @@
 import SwiftUI
 import CoreHaptics
+import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 // MARK: - Model
 
@@ -287,5 +289,127 @@ final class DrawHaptics {
     private func play(_ events: [CHHapticEvent]) {
         guard let engine, let pattern = try? CHHapticPattern(events: events, parameters: []) else { return }
         try? engine.makePlayer(with: pattern).start(atTime: CHHapticTimeImmediate)
+    }
+}
+
+// MARK: - Touch handling
+
+/// Transparent UIKit layer over a post photo that turns a press-and-hold into
+/// drawing. Built on UIKit gesture recognizers so the feed always scrolls
+/// normally: a hold only starts once the finger has stayed still, and any
+/// earlier movement goes to the scroll view.
+struct DrawTouchLayer: UIViewRepresentable {
+    var isDrawing: Bool
+    var onHoldBegan: () -> Void
+    var onStroke: (CGPoint, CGSize, Date) -> Void
+    var onStrokeEnded: () -> Void
+    var onDoubleTap: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        let c = context.coordinator
+        c.view = view
+
+        let hold = UILongPressGestureRecognizer(target: c, action: #selector(Coordinator.handleHold(_:)))
+        hold.minimumPressDuration = 0.32
+        hold.allowableMovement = 8
+        hold.delegate = c
+        view.addGestureRecognizer(hold)
+        c.hold = hold
+
+        let draw = ImmediatePanGestureRecognizer(target: c, action: #selector(Coordinator.handleDraw(_:)))
+        draw.maximumNumberOfTouches = 1
+        draw.isEnabled = false
+        view.addGestureRecognizer(draw)
+        c.draw = draw
+
+        let doubleTap = UITapGestureRecognizer(target: c, action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.delegate = c
+        view.addGestureRecognizer(doubleTap)
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        let c = context.coordinator
+        c.parent = self
+        c.hold?.isEnabled = !isDrawing
+        c.draw?.isEnabled = isDrawing
+        c.setScrollLocked(isDrawing)
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: DrawTouchLayer?
+        weak var view: UIView?
+        weak var hold: UILongPressGestureRecognizer?
+        weak var draw: UIPanGestureRecognizer?
+        private weak var lockedScroll: UIScrollView?
+
+        @objc func handleHold(_ g: UILongPressGestureRecognizer) {
+            guard let view, let parent else { return }
+            let point = g.location(in: view)
+            switch g.state {
+            case .began:
+                setScrollLocked(true)
+                parent.onHoldBegan()
+                parent.onStroke(point, view.bounds.size, .now)
+            case .changed:
+                parent.onStroke(point, view.bounds.size, .now)
+            case .ended, .cancelled, .failed:
+                parent.onStrokeEnded()
+            default:
+                break
+            }
+        }
+
+        @objc func handleDraw(_ g: UIPanGestureRecognizer) {
+            guard let view, let parent else { return }
+            switch g.state {
+            case .began, .changed:
+                parent.onStroke(g.location(in: view), view.bounds.size, .now)
+            case .ended, .cancelled, .failed:
+                parent.onStrokeEnded()
+            default:
+                break
+            }
+        }
+
+        @objc func handleDoubleTap(_ g: UITapGestureRecognizer) {
+            parent?.onDoubleTap()
+        }
+
+        /// Stops the feed scrolling while drawing (and cancels a scroll
+        /// that may have started), then gives it back afterwards.
+        func setScrollLocked(_ locked: Bool) {
+            if locked {
+                guard lockedScroll == nil else { return }
+                var ancestor = view?.superview
+                while let current = ancestor, !(current is UIScrollView) { ancestor = current.superview }
+                guard let scroll = ancestor as? UIScrollView else { return }
+                scroll.panGestureRecognizer.isEnabled = false
+                lockedScroll = scroll
+            } else if let scroll = lockedScroll {
+                scroll.panGestureRecognizer.isEnabled = true
+                lockedScroll = nil
+            }
+        }
+
+        // Let the scroll view keep working alongside the hold and double-tap.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            true
+        }
+    }
+}
+
+/// A pan that starts the moment the finger touches, so strokes begin
+/// exactly where you put your finger down.
+final class ImmediatePanGestureRecognizer: UIPanGestureRecognizer {
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        if state == .possible { state = .began }
     }
 }
