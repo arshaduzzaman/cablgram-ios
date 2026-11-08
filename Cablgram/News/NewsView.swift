@@ -63,17 +63,16 @@ struct NewsView: View {
     private var stepsRow: some View {
         Button(action: openWalk) {
             HStack(spacing: 12) {
-                ZStack {
-                    Circle().stroke(Color(.systemFill), lineWidth: 3)
-                    Circle()
-                        .trim(from: 0, to: steps.goalReward.map { min(Double(steps.totalSteps) / Double($0.steps), 1) } ?? 1)
-                        .stroke(Color.brand, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
+                if let goal = steps.goalReward {
+                    RewardImage(reward: goal)
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                } else {
                     Image(systemName: "figure.walk")
-                        .font(.caption2.weight(.bold))
+                        .font(.headline)
                         .foregroundStyle(Color.brand)
+                        .frame(width: 44, height: 44)
                 }
-                .frame(width: 30, height: 30)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text("\(steps.stepsThisWeek.formatted()) steps this week")

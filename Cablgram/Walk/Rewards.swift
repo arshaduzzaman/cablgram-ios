@@ -25,7 +25,7 @@ struct Reward: Identifiable, Hashable {
         Reward(id: "gta-6", title: "GTA 6", partner: nil,
                steps: 75_000, systemImage: "opticaldisc.fill"),
         Reward(id: "ps5", title: "PlayStation 5", partner: nil,
-               steps: 100_000, systemImage: "gamecontroller.fill"),
+               steps: 500_000, systemImage: "gamecontroller.fill"),
     ]
 }
 
