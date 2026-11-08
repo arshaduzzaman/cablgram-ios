@@ -15,7 +15,6 @@ struct WalkPage: View {
     @StateObject private var planner = RoutePlanner()
     @StateObject private var location = LocationTracker()
 
-    @AppStorage("walk.dailyGoal") private var dailyGoal = 8_000
     @State private var selectedID: WalkSuggestion.ID?
     @State private var addingKind: SavedPlace.Kind?
     @State private var showingMap = false
@@ -26,7 +25,6 @@ struct WalkPage: View {
     /// doesn't buzz for rewards or goals that were already reached.
     @State private var celebrationsReady = false
 
-    private var stepsNeeded: Int { max(dailyGoal - steps.stepsToday, 0) }
     private var selected: WalkSuggestion? { planner.suggestions.first { $0.id == selectedID } }
     private var myRank: Int? { leaderboard.rank(of: auth.user?.uid) }
 
@@ -46,7 +44,6 @@ struct WalkPage: View {
                         .card()
                 }
 
-                goalCard
                 walkIdeas
                 leaderboardPreview
                 rewards
@@ -82,9 +79,6 @@ struct WalkPage: View {
         }
         .onChange(of: steps.unlockedCount) { old, new in
             if celebrationsReady && new > old { Haptics.success() }
-        }
-        .onChange(of: stepsNeeded == 0) { wasDone, isDone in
-            if celebrationsReady && isDone && !wasDone { Haptics.success() }
         }
         .onChange(of: myRank) { old, new in
             if celebrationsReady, let old, let new, new < old { Haptics.success() }
@@ -137,58 +131,6 @@ struct WalkPage: View {
         }
     }
 
-    // MARK: - Daily goal
-
-    private var goalCard: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle().stroke(Color(.systemFill), lineWidth: 5)
-                Circle()
-                    .trim(from: 0, to: min(Double(steps.stepsToday) / Double(dailyGoal), 1))
-                    .stroke(Color.brand, style: StrokeStyle(lineWidth: 5, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .animation(.spring(duration: 0.5), value: steps.stepsToday)
-                Image(systemName: stepsNeeded == 0 ? "checkmark" : "flag.fill")
-                    .font(.footnote.bold())
-                    .foregroundStyle(Color.brand)
-            }
-            .frame(width: 46, height: 46)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Daily goal · \(dailyGoal.formatted())")
-                    .font(.subheadline.weight(.semibold))
-                    .contentTransition(.numericText())
-                Text(stepsNeeded == 0 ? "Goal reached today 🎉" : "\(stepsNeeded.formatted()) steps to go")
-                    .font(.caption)
-                    .foregroundStyle(stepsNeeded == 0 ? Color.brand : .secondary)
-            }
-
-            Spacer(minLength: 4)
-
-            HStack(spacing: 8) {
-                roundButton("minus", label: "Lower goal") { dailyGoal = max(2_000, dailyGoal - 1_000) }
-                roundButton("plus", label: "Raise goal") { dailyGoal = min(30_000, dailyGoal + 1_000) }
-            }
-        }
-        .padding(14)
-        .card()
-        .animation(.snappy, value: dailyGoal)
-    }
-
-    private func roundButton(_ systemImage: String, label: String, action: @escaping () -> Void) -> some View {
-        Button {
-            Haptics.select()
-            action()
-        } label: {
-            Image(systemName: systemImage)
-                .font(.subheadline.bold())
-                .frame(width: 34, height: 34)
-                .background(Color(.tertiarySystemFill), in: Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
-    }
-
     // MARK: - Walk ideas (map + suggestions)
 
     private var walkIdeas: some View {
@@ -231,9 +173,9 @@ struct WalkPage: View {
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
-                            ForEach(planner.ranked(for: stepsNeeded)) { walk in
+                            ForEach(planner.ranked(toGoal: steps.stepsToGoal)) { walk in
                                 SuggestionCard(walk: walk,
-                                               reachesGoal: stepsNeeded > 0 && walk.steps >= stepsNeeded,
+                                               reachesGoal: steps.stepsToGoal > 0 && walk.steps >= steps.stepsToGoal,
                                                isSelected: walk.id == selectedID)
                                     .frame(width: 270)
                                     .onTapGesture {
@@ -253,7 +195,7 @@ struct WalkPage: View {
 
             placeChips
 
-            if stepsNeeded > 0 {
+            if steps.stepsToGoal > 0 {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "lightbulb.fill").foregroundStyle(.yellow)
                     Text("Taking a rickshaw or bus? Get off 1 km early and walk the rest: about **+1,300 steps**.")
@@ -402,13 +344,12 @@ struct WalkPage: View {
 
     // MARK: - Helpers
 
-    /// "Start a walk": open the map, or ask for home first if it isn't set.
+    /// "Start a walk": open the map with the best walk picked, ready to go.
     private func startWalk() {
-        if places.home == nil {
-            addingKind = .home
-        } else {
-            showingMap = true
+        if selectedID == nil {
+            selectedID = planner.ranked(toGoal: steps.stepsToGoal).first?.id
         }
+        showingMap = true
     }
 
     private func claim(_ reward: Reward) {

@@ -54,11 +54,12 @@ final class RoutePlanner: ObservableObject {
 
     private var googleCache: [String: WalkLeg] = [:]
 
-    /// Walks that reach `stepsNeeded` first (shortest first), then the rest
-    /// (longest first, since they get closest).
-    func ranked(for stepsNeeded: Int, limit: Int = 8) -> [WalkSuggestion] {
-        let reaching = suggestions.filter { $0.steps >= stepsNeeded }.sorted { $0.steps < $1.steps }
-        let short = suggestions.filter { $0.steps < stepsNeeded }.sorted { $0.steps > $1.steps }
+    /// Walks that would unlock the goal reward first (shortest first), then
+    /// the rest (longest first, since they get closest).
+    func ranked(toGoal stepsToGoal: Int, limit: Int = 8) -> [WalkSuggestion] {
+        guard stepsToGoal > 0 else { return Array(suggestions.sorted { $0.steps < $1.steps }.prefix(limit)) }
+        let reaching = suggestions.filter { $0.steps >= stepsToGoal }.sorted { $0.steps < $1.steps }
+        let short = suggestions.filter { $0.steps < stepsToGoal }.sorted { $0.steps > $1.steps }
         return Array((reaching + short).prefix(limit))
     }
     private var appleCache: [String: WalkLeg] = [:]

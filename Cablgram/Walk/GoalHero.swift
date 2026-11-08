@@ -4,7 +4,6 @@ import SwiftUI
 /// how long that takes, and a button to start walking.
 struct GoalHero: View {
     @EnvironmentObject private var steps: StepStore
-    @AppStorage("walk.dailyGoal") private var dailyGoal = 8_000
 
     let onStartWalk: () -> Void
     let onChangeGoal: () -> Void
@@ -30,7 +29,7 @@ struct GoalHero: View {
             }
 
             HStack {
-                Text("Today **\(steps.stepsToday.formatted())** steps")
+                Text("This week **\(steps.stepsThisWeek.formatted())** steps")
                 Spacer()
                 Text("Total **\(steps.totalSteps.formatted())**")
             }
@@ -77,9 +76,8 @@ struct GoalHero: View {
     private func progress(_ goal: Reward) -> some View {
         let remaining = max(goal.steps - steps.totalSteps, 0)
         let fraction = min(Double(steps.totalSteps) / Double(goal.steps), 1)
-        let usingGoal = steps.dailyPace < 500
-        let pace = usingGoal ? dailyGoal : steps.dailyPace
-        let days = Int((Double(remaining) / Double(pace)).rounded(.up))
+        let pace = steps.dailyPace
+        let days = pace >= 500 ? Int((Double(remaining) / Double(pace)).rounded(.up)) : nil
         let minutes = Int((Double(remaining) / stepsPerMinute).rounded())
 
         return VStack(alignment: .leading, spacing: 16) {
@@ -118,12 +116,14 @@ struct GoalHero: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Label {
-                    Text(days <= 1
-                         ? "You could get it **today**"
-                         : "About **\(days) days** at \(usingGoal ? "your \(dailyGoal.formatted())-a-day goal" : "your pace of \(pace.formatted()) a day")")
-                } icon: {
-                    Image(systemName: "calendar").foregroundStyle(Color.brand)
+                if let days {
+                    Label {
+                        Text(days <= 1
+                             ? "You could get it **today**"
+                             : "About **\(days) days** at your pace of \(pace.formatted()) a day")
+                    } icon: {
+                        Image(systemName: "calendar").foregroundStyle(Color.brand)
+                    }
                 }
                 Label {
                     Text("That's roughly **\(Self.duration(minutes))** of walking")

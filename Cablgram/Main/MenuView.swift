@@ -31,7 +31,7 @@ struct MenuView: View {
 
                 HStack(spacing: 12) {
                     stat(steps.totalSteps.formatted(), "Total steps")
-                    stat(steps.stepsToday.formatted(), "Today")
+                    stat(steps.stepsThisWeek.formatted(), "This week")
                     stat("\(claimed.count)", "Rewards")
                 }
 

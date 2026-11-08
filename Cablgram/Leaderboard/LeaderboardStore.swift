@@ -7,9 +7,9 @@ struct LeaderboardEntry: Identifiable, Equatable {
     let name: String
     let photoURL: URL?
     let totalSteps: Int
-    let todaySteps: Int
-    /// Local date (yyyy-MM-dd) that `todaySteps` belongs to.
-    let day: String
+    let weekSteps: Int
+    /// Week (e.g. 2026-W45) that `weekSteps` belongs to.
+    let week: String
 }
 
 /// Live leaderboard from Firestore's `walkers` collection. Each signed-in
@@ -20,13 +20,13 @@ final class LeaderboardStore: ObservableObject {
     @Published private(set) var errorMessage: String?
 
     private var listener: ListenerRegistration?
-    private var lastUploaded: (uid: String, total: Int, today: Int)?
+    private var lastUploaded: (uid: String, total: Int, week: Int)?
 
-    static var todayKey: String {
+    static var weekKey: String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.dateFormat = "YYYY-'W'ww"
         return formatter.string(from: .now)
     }
 
@@ -44,8 +44,8 @@ final class LeaderboardStore: ObservableObject {
                         name: data["name"] as? String ?? "Walker",
                         photoURL: (data["photoURL"] as? String).flatMap(URL.init(string:)),
                         totalSteps: (data["totalSteps"] as? NSNumber)?.intValue ?? 0,
-                        todaySteps: (data["todaySteps"] as? NSNumber)?.intValue ?? 0,
-                        day: data["day"] as? String ?? ""
+                        weekSteps: (data["weekSteps"] as? NSNumber)?.intValue ?? 0,
+                        week: data["week"] as? String ?? ""
                     )
                 }
                 let message = error?.localizedDescription
@@ -63,18 +63,18 @@ final class LeaderboardStore: ObservableObject {
     }
 
     /// Saves the signed-in user's steps, skipping writes when nothing changed.
-    func upload(totalSteps: Int, todaySteps: Int) {
+    func upload(totalSteps: Int, weekSteps: Int) {
         guard AuthStore.isConfigured, let user = Auth.auth().currentUser else { return }
-        if let last = lastUploaded, last.uid == user.uid, last.total == totalSteps, last.today == todaySteps {
+        if let last = lastUploaded, last.uid == user.uid, last.total == totalSteps, last.week == weekSteps {
             return
         }
-        lastUploaded = (user.uid, totalSteps, todaySteps)
+        lastUploaded = (user.uid, totalSteps, weekSteps)
 
         var data: [String: Any] = [
             "name": user.displayName ?? "Walker",
             "totalSteps": totalSteps,
-            "todaySteps": todaySteps,
-            "day": Self.todayKey,
+            "weekSteps": weekSteps,
+            "week": Self.weekKey,
             "updatedAt": FieldValue.serverTimestamp(),
         ]
         data["photoURL"] = user.photoURL?.absoluteString
@@ -105,10 +105,10 @@ final class LeaderboardStore: ObservableObject {
         return ranked.firstIndex { $0.id == uid }.map { $0 + 1 }
     }
 
-    /// Top walkers today (only people who've synced today).
-    var today: [LeaderboardEntry] {
-        let key = Self.todayKey
-        return ranked.filter { $0.day == key && $0.todaySteps > 0 }.sorted { $0.todaySteps > $1.todaySteps }
+    /// Top walkers this week (only people who've synced this week).
+    var thisWeek: [LeaderboardEntry] {
+        let key = Self.weekKey
+        return ranked.filter { $0.week == key && $0.weekSteps > 0 }.sorted { $0.weekSteps > $1.weekSteps }
     }
 
     #if DEBUG
@@ -133,7 +133,7 @@ final class LeaderboardStore: ObservableObject {
         ("Nayeem Hasan", 12_350, 1_970), ("Mim Akter", 6_840, 2_610),
     ].enumerated().map { index, walker in
         LeaderboardEntry(id: "sample-\(index)", name: walker.0, photoURL: nil,
-                         totalSteps: walker.1, todaySteps: walker.2, day: todayKey)
+                         totalSteps: walker.1, weekSteps: walker.2, week: weekKey)
     }
     #endif
 }

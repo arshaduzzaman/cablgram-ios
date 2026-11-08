@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Full-screen map of your usual places, opened from the Walk page, with a
-/// bottom panel of walks that reach today's step goal. Shares its places,
-/// routes and selected walk with the Walk page.
+/// bottom panel of walks toward your reward and a button to start walking.
+/// Shares its places, routes and selected walk with the Walk page.
 struct RoutesView: View {
     @Binding var selectedID: WalkSuggestion.ID?
     var onClose: () -> Void
@@ -12,11 +12,17 @@ struct RoutesView: View {
     @EnvironmentObject private var planner: RoutePlanner
     @EnvironmentObject private var location: LocationTracker
 
-    @AppStorage("walk.dailyGoal") private var dailyGoal = 8_000
     @State private var addingKind: SavedPlace.Kind?
     @State private var isExpanded = false
+    @State private var navigation: NavigationRequest?
+    @State private var finishedSteps: Int?
 
-    private var stepsNeeded: Int { max(dailyGoal - steps.stepsToday, 0) }
+    /// A walk to navigate. `walk` is nil for a free walk.
+    struct NavigationRequest: Identifiable {
+        let id = UUID()
+        let walk: WalkSuggestion?
+    }
+
 
     private var selected: WalkSuggestion? {
         planner.suggestions.first { $0.id == selectedID }
@@ -54,6 +60,27 @@ struct RoutesView: View {
             }
             .presentationDetents([.large])
         }
+        .fullScreenCover(item: $navigation) { request in
+            WalkNavigationView(walk: request.walk) { walked in
+                navigation = nil
+                finishedSteps = walked
+                Task { await steps.refresh() }
+            }
+            .environmentObject(steps)
+            .tint(.brand)
+        }
+        .alert("Nice walk! 🎉", isPresented: Binding(
+            get: { finishedSteps != nil },
+            set: { if !$0 { finishedSteps = nil } }
+        )) {
+            Button("Done") { finishedSteps = nil }
+        } message: {
+            if let walked = finishedSteps, let goal = steps.goalReward {
+                Text("You walked \(walked.formatted()) steps. \(steps.stepsToGoal == 0 ? "\(goal.fullName) is ready to claim!" : "\(steps.stepsToGoal.formatted()) more to \(goal.fullName).")")
+            } else {
+                Text("You walked \(finishedSteps?.formatted() ?? "0") steps.")
+            }
+        }
     }
 
     // MARK: - Floating top bar
@@ -77,15 +104,15 @@ struct RoutesView: View {
                 ZStack {
                     Circle().stroke(Color.brand.opacity(0.2), lineWidth: 4)
                     Circle()
-                        .trim(from: 0, to: min(Double(steps.stepsToday) / Double(dailyGoal), 1))
+                        .trim(from: 0, to: steps.goalReward.map { min(Double(steps.totalSteps) / Double($0.steps), 1) } ?? 1)
                         .stroke(Color.brand, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                 }
                 .frame(width: 26, height: 26)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("\(steps.stepsToday.formatted()) / \(dailyGoal.formatted())")
+                    Text(steps.stepsToGoal == 0 ? "Ready to claim 🎉" : "\(steps.stepsToGoal.formatted()) steps")
                         .font(.subheadline.bold().monospacedDigit())
-                    Text(stepsNeeded == 0 ? "Goal reached 🎉" : "\(stepsNeeded.formatted()) to go")
+                    Text(steps.goalReward.map { "to \($0.fullName)" } ?? "All rewards claimed")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -149,9 +176,9 @@ struct RoutesView: View {
                         }
                         .padding(.vertical, 8)
                     } else {
-                        ForEach(planner.ranked(for: stepsNeeded)) { walk in
+                        ForEach(planner.ranked(toGoal: steps.stepsToGoal)) { walk in
                             SuggestionCard(walk: walk,
-                                           reachesGoal: stepsNeeded > 0 && walk.steps >= stepsNeeded,
+                                           reachesGoal: steps.stepsToGoal > 0 && walk.steps >= steps.stepsToGoal,
                                            isSelected: walk.id == selectedID)
                                 .onTapGesture {
                                     Haptics.select()
@@ -164,11 +191,51 @@ struct RoutesView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 20)
             }
+
+            startBar
         }
         .frame(maxWidth: .infinity)
         .background(Color(.systemBackground),
                     in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28, style: .continuous))
         .shadow(color: .black.opacity(0.12), radius: 16, y: -2)
+    }
+
+    /// "Start this walk" for the selected route, or "Just walk" without one.
+    private var startBar: some View {
+        HStack(spacing: 10) {
+            if let selected {
+                Button {
+                    Haptics.press()
+                    navigation = NavigationRequest(walk: selected)
+                } label: {
+                    Label("Start this walk", systemImage: "location.north.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(Color.brand, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    Haptics.press()
+                    navigation = NavigationRequest(walk: nil)
+                } label: {
+                    Label("Just walk", systemImage: "figure.walk")
+                        .font(.headline)
+                        .foregroundStyle(Color.brand)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(Color.brand.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .background(Color(.systemBackground))
+        .animation(.snappy, value: selectedID)
     }
 
     private func prompt(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
@@ -212,7 +279,7 @@ struct SuggestionCard: View {
 
             HStack(spacing: 6) {
                 if reachesGoal {
-                    tag("Reaches your goal", foreground: .white, background: AnyShapeStyle(Color.brand))
+                    tag("Unlocks your reward", foreground: .white, background: AnyShapeStyle(Color.brand))
                 }
                 if walk.isEstimate {
                     tag("Estimated", foreground: .secondary, background: AnyShapeStyle(Color(.tertiarySystemFill)))

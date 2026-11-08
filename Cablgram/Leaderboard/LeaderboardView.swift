@@ -4,7 +4,7 @@ import SwiftUI
 struct LeaderboardView: View {
     enum Period: String, CaseIterable, Identifiable {
         case allTime = "All time"
-        case today = "Today"
+        case thisWeek = "This week"
         var id: String { rawValue }
     }
 
@@ -13,11 +13,11 @@ struct LeaderboardView: View {
     @State private var period: Period = .allTime
 
     private var rows: [LeaderboardEntry] {
-        period == .allTime ? leaderboard.ranked : leaderboard.today
+        period == .allTime ? leaderboard.ranked : leaderboard.thisWeek
     }
 
     private func steps(of entry: LeaderboardEntry) -> Int {
-        period == .allTime ? entry.totalSteps : entry.todaySteps
+        period == .allTime ? entry.totalSteps : entry.weekSteps
     }
 
     private var myRank: Int? {
@@ -35,8 +35,8 @@ struct LeaderboardView: View {
                 .onChange(of: period) { _, _ in Haptics.select() }
 
                 if let notice = LeaderboardNotice.current(auth: auth, leaderboard: leaderboard, isEmpty: rows.isEmpty,
-                                                          emptyText: period == .today
-                                                              ? "Nobody has walked yet today. Be the first!"
+                                                          emptyText: period == .thisWeek
+                                                              ? "Nobody has walked yet this week. Be the first!"
                                                               : "No walkers yet. Start walking to take #1!") {
                     notice
                 } else {
@@ -44,7 +44,7 @@ struct LeaderboardView: View {
                         HStack {
                             Text("You're #\(myRank)").font(.headline)
                             Spacer()
-                            Text(period == .allTime ? "all time" : "today")
+                            Text(period == .allTime ? "all time" : "this week")
                                 .font(.subheadline)
                                 .opacity(0.85)
                         }

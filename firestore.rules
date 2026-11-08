@@ -19,9 +19,9 @@ service cloud.firestore {
         && request.resource.data.totalSteps is int
         && request.resource.data.totalSteps >= 0
         && request.resource.data.totalSteps <= 5000000
-        && request.resource.data.todaySteps is int
-        && request.resource.data.todaySteps >= 0
-        && request.resource.data.todaySteps <= 150000;
+        && request.resource.data.weekSteps is int
+        && request.resource.data.weekSteps >= 0
+        && request.resource.data.weekSteps <= 1000000;
     }
   }
 }

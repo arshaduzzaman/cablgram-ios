@@ -27,6 +27,7 @@ struct CablgramApp: App {
             .environmentObject(steps)
             .environmentObject(leaderboard)
             .tint(.brand)
+            .preferredColorScheme(.light)
             .onOpenURL { url in
                 // Returns from the Google sign-in page.
                 GIDSignIn.sharedInstance.handle(url)

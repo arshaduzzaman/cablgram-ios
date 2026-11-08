@@ -11,7 +11,7 @@ final class StepStore: ObservableObject {
 
     @Published private(set) var access: Access = .notRequested
     @Published private(set) var stepsSinceJoining = 0
-    @Published private(set) var stepsToday = 0
+    @Published private(set) var stepsThisWeek = 0
     /// True once the first step count has arrived (or Health is unavailable),
     /// so the UI can tell real progress apart from the initial load.
     @Published private(set) var hasLoaded = false
@@ -67,6 +67,12 @@ final class StepStore: ObservableObject {
         return Reward.all.first { !isClaimed($0) }
     }
 
+    /// Steps still needed for the goal reward (0 when it's unlocked).
+    var stepsToGoal: Int {
+        guard let goal = goalReward else { return 0 }
+        return max(goal.steps - totalSteps, 0)
+    }
+
     func setGoal(_ reward: Reward) {
         goalRewardID = reward.id
         defaults.set(reward.id, forKey: "walk.goalReward")
@@ -114,9 +120,10 @@ final class StepStore: ObservableObject {
 
     func refresh() async {
         guard access == .ready else { return }
-        let startOfToday = Calendar.current.startOfDay(for: .now)
+        let startOfWeek = Calendar.current.dateInterval(of: .weekOfYear, for: .now)?.start
+            ?? Calendar.current.startOfDay(for: .now)
         stepsSinceJoining = await sumOfSteps(from: joinDate)
-        stepsToday = await sumOfSteps(from: startOfToday)
+        stepsThisWeek = await sumOfSteps(from: startOfWeek)
         hasLoaded = true
     }
 

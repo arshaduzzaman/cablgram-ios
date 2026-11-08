@@ -71,16 +71,16 @@ struct MainView: View {
         .task(id: auth.user?.uid) {
             if auth.user != nil {
                 leaderboard.startListening()
-                leaderboard.upload(totalSteps: steps.totalSteps, todaySteps: steps.stepsToday)
+                leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek)
             } else {
                 leaderboard.stopListening()
             }
         }
         .onChange(of: steps.totalSteps) { _, _ in
-            leaderboard.upload(totalSteps: steps.totalSteps, todaySteps: steps.stepsToday)
+            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek)
         }
-        .onChange(of: steps.stepsToday) { _, _ in
-            leaderboard.upload(totalSteps: steps.totalSteps, todaySteps: steps.stepsToday)
+        .onChange(of: steps.stepsThisWeek) { _, _ in
+            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek)
         }
     }
 }

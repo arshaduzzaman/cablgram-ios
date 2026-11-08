@@ -8,7 +8,8 @@ struct NewsView: View {
     @EnvironmentObject private var steps: StepStore
     @StateObject private var feed = NewsFeed()
     @StateObject private var slaps = SlapStore()
-    @AppStorage("walk.dailyGoal") private var dailyGoal = 8_000
+    @StateObject private var drawings = DrawingStore()
+    @State private var drawingOn: NewsPost?
 
     var body: some View {
         ScrollView {
@@ -23,9 +24,11 @@ struct NewsView: View {
                 }
 
                 ForEach(feed.posts) { post in
-                    PostRow(post: post, slapCount: slaps.count(for: post.id)) {
-                        slaps.slap(post.id)
-                    }
+                    PostRow(post: post,
+                            slapCount: slaps.count(for: post.id),
+                            strokes: drawings.strokes(for: post.id),
+                            onSlap: { slaps.slap(post.id) },
+                            onDraw: { drawingOn = post })
                     .hairline()
                     .task { await feed.loadMoreIfNeeded(after: post) }
                 }
@@ -45,6 +48,15 @@ struct NewsView: View {
         .task {
             if feed.posts.isEmpty { await feed.refresh() }
         }
+        .fullScreenCover(item: $drawingOn) { post in
+            DrawingEditor(imageURL: URL(string: post.imageUrl),
+                          strokes: drawings.strokes(for: post.id),
+                          onDone: { strokes in
+                              drawings.save(strokes, for: post.id)
+                              drawingOn = nil
+                          },
+                          onCancel: { drawingOn = nil })
+        }
     }
 
     /// Today's steps in one slim line, linking to the Walk tab.
@@ -54,7 +66,7 @@ struct NewsView: View {
                 ZStack {
                     Circle().stroke(Color(.systemFill), lineWidth: 3)
                     Circle()
-                        .trim(from: 0, to: min(Double(steps.stepsToday) / Double(dailyGoal), 1))
+                        .trim(from: 0, to: steps.goalReward.map { min(Double(steps.totalSteps) / Double($0.steps), 1) } ?? 1)
                         .stroke(Color.brand, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                     Image(systemName: "figure.walk")
@@ -64,10 +76,10 @@ struct NewsView: View {
                 .frame(width: 30, height: 30)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("\(steps.stepsToday.formatted()) steps today")
+                    Text("\(steps.stepsThisWeek.formatted()) steps this week")
                         .font(.subheadline.weight(.semibold))
-                    if let next = steps.nextReward {
-                        Text("\((next.steps - steps.totalSteps).formatted()) to \(next.fullName)")
+                    if let goal = steps.goalReward {
+                        Text(steps.stepsToGoal == 0 ? "\(goal.fullName) is ready to claim" : "\(steps.stepsToGoal.formatted()) steps to \(goal.fullName)")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -92,7 +104,9 @@ struct NewsView: View {
 private struct PostRow: View {
     let post: NewsPost
     let slapCount: Int
+    let strokes: [Stroke]
     let onSlap: () -> Void
+    let onDraw: () -> Void
 
     @State private var showBurst = false
 
@@ -116,7 +130,21 @@ private struct PostRow: View {
 
                 photo
 
-                SlapButton(count: slapCount, action: slap)
+                HStack(spacing: 14) {
+                    SlapButton(count: slapCount, action: slap)
+                    Button {
+                        Haptics.tap()
+                        onDraw()
+                    } label: {
+                        Image(systemName: strokes.isEmpty ? "pencil.tip.crop.circle" : "pencil.tip.crop.circle.fill")
+                            .font(.system(size: 21))
+                            .foregroundStyle(strokes.isEmpty ? Color.primary : Color.brand)
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(strokes.isEmpty ? "Draw on this post" : "Edit your drawing")
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -129,6 +157,7 @@ private struct PostRow: View {
             switch phase {
             case .success(let image):
                 image.resizable().scaledToFit()
+                    .overlay { DoodleCanvas(strokes: strokes) }
             case .failure:
                 placeholder(systemImage: "photo")
             default:

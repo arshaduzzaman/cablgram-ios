@@ -25,6 +25,23 @@ private struct GoogleFailure: Decodable {
     let error: Inner
 }
 
+/// One turn-by-turn instruction.
+struct NavStep {
+    let instruction: String
+    /// Google maneuver, e.g. TURN_LEFT, STRAIGHT, ROUNDABOUT_RIGHT.
+    let maneuver: String
+    let meters: Double
+    let end: CLLocationCoordinate2D
+}
+
+/// A walking route for navigation: the line to draw and the turns along it.
+struct NavRoute {
+    let coordinates: [CLLocationCoordinate2D]
+    let steps: [NavStep]
+    let meters: Double
+    let seconds: Double
+}
+
 struct GoogleAPIError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
@@ -92,6 +109,59 @@ enum GoogleAPI {
         let seconds = Double(route.duration?.replacingOccurrences(of: "s", with: "") ?? "") ?? meters / 1.3
         let coordinates = route.polyline.map { decodePolyline($0.encodedPolyline) } ?? points
         return WalkLeg(coordinates: coordinates, meters: meters, seconds: seconds, isEstimate: false)
+    }
+
+    /// Walking route with turn-by-turn steps through `points` in order.
+    static func walkingNavigation(through points: [CLLocationCoordinate2D]) async throws -> NavRoute {
+        guard let first = points.first, let last = points.last, points.count >= 2 else {
+            throw GoogleAPIError(message: "A route needs at least two points.")
+        }
+        var body: [String: Any] = [
+            "origin": waypoint(first),
+            "destination": waypoint(last),
+            "travelMode": "WALK",
+        ]
+        if points.count > 2 {
+            body["intermediates"] = points.dropFirst().dropLast().map(waypoint)
+        }
+
+        struct Result: Decodable {
+            struct LatLng: Decodable { let latitude: Double; let longitude: Double }
+            struct Location: Decodable { let latLng: LatLng }
+            struct Instruction: Decodable { let maneuver: String?; let instructions: String? }
+            struct Step: Decodable {
+                let distanceMeters: Double?
+                let endLocation: Location?
+                let navigationInstruction: Instruction?
+            }
+            struct Leg: Decodable { let steps: [Step]? }
+            struct Polyline: Decodable { let encodedPolyline: String }
+            struct Route: Decodable {
+                let distanceMeters: Double?
+                let duration: String?
+                let polyline: Polyline?
+                let legs: [Leg]?
+            }
+            let routes: [Route]?
+        }
+        let result: Result = try await post(
+            "https://routes.googleapis.com/directions/v2:computeRoutes",
+            fieldMask: "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.steps.distanceMeters,routes.legs.steps.endLocation,routes.legs.steps.navigationInstruction",
+            body: body
+        )
+        guard let route = result.routes?.first, let meters = route.distanceMeters else {
+            throw GoogleAPIError(message: "Google found no walking route.")
+        }
+        let steps: [NavStep] = (route.legs ?? []).flatMap { $0.steps ?? [] }.compactMap { step in
+            guard let end = step.endLocation?.latLng else { return nil }
+            return NavStep(instruction: step.navigationInstruction?.instructions ?? "Continue",
+                           maneuver: step.navigationInstruction?.maneuver ?? "STRAIGHT",
+                           meters: step.distanceMeters ?? 0,
+                           end: CLLocationCoordinate2D(latitude: end.latitude, longitude: end.longitude))
+        }
+        let seconds = Double(route.duration?.replacingOccurrences(of: "s", with: "") ?? "") ?? meters / 1.3
+        return NavRoute(coordinates: route.polyline.map { decodePolyline($0.encodedPolyline) } ?? points,
+                        steps: steps, meters: meters, seconds: seconds)
     }
 
     // MARK: Places API (New)
