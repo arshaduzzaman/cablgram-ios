@@ -3,7 +3,7 @@
 SwiftUI app. Everyone signs in with Google first. The layout follows the Facebook app: a "cablgram" bar on top, icon tabs under it.
 
 - **News** (home icon): the Cablgram post feed from `https://www.cablgram.com/api/facebook-posts`, the same one the website shows. Pull to refresh, scroll for more, tap to open, or share.
-- **Walk**: everything about walking on one scrolling page: the reward you picked and steps to go, walk ideas (a map preview plus swipeable walks between your usual places, with a full-screen map), a leaderboard preview with "See all", and rewards. Liberty Pizza Slice and Uncle Bobo's Chicken (10,000), Smashed Chicken Burger (15,000), GTA 6 (75,000) and PlayStation 5 (500,000). Edit the list in `Cablgram/Walk/Rewards.swift`.
+- **Walk**: everything about walking on one scrolling page: the reward you picked and steps to go, walk ideas (a map preview plus swipeable walks between your usual places, with a full-screen map), a leaderboard preview with "See all", and rewards. Uncle Bobo's Chicken (10,000), Liberty Pizza Slice and Smashed Chicken Burger (15,000), GTA 6 (75,000) and PlayStation 5 (500,000). Edit the list in `Cablgram/Walk/Rewards.swift`.
 - **Menu**: your profile, stats, claimed rewards, a Haptics switch and sign out.
 
 Haptic feedback (`Cablgram/Shared/Haptics.swift`) plays on taps, selections and tab changes, and a celebration buzz plays when you claim or unlock a reward, reach a step milestone on a walk, or move up the leaderboard.
