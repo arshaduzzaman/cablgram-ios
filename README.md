@@ -62,4 +62,14 @@ To run on a real iPhone, choose your team under **Signing & Capabilities**. Heal
 ## Not built yet
 
 - Claiming a reward is only saved on the phone. Delivering real prizes needs server-side step checks (to stop cheating) and voucher or shipping details for partners.
-- App icon (`Assets.xcassets/AppIcon`) is empty.
+
+## TestFlight (Xcode Cloud)
+
+Xcode Cloud builds the app on Apple's servers and sends it to TestFlight, so you don't need the latest Xcode on your Mac. `ci_scripts/ci_post_clone.sh` recreates the two git-ignored files from secret environment variables set on the workflow:
+
+| Variable | Value |
+| --- | --- |
+| `GOOGLE_MAPS_API_KEY` | your Google Maps key |
+| `GOOGLE_SERVICE_INFO_PLIST_BASE64` | output of `base64 -i Cablgram/GoogleService-Info.plist` |
+
+It also sets the build number from Xcode Cloud, so every upload is accepted.
