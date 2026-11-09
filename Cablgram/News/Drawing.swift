@@ -60,54 +60,10 @@ struct DoodleComment: Codable, Identifiable, Equatable {
     var author: String
     var date: Date
     var strokes: [Stroke]
+    /// Firebase uid of whoever drew it, so they can delete it.
+    var authorID: String?
 
     static func == (lhs: DoodleComment, rhs: DoodleComment) -> Bool { lhs.id == rhs.id }
-}
-
-/// Drawing comments per post, saved on the phone for now. A backend can
-/// replace this later so everyone sees each other's drawings.
-@MainActor
-final class DrawingStore: ObservableObject {
-    @Published private(set) var comments: [String: [DoodleComment]] = [:]
-
-    private static let folder: URL = {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }()
-    private let url = folder.appendingPathComponent("doodle-comments.json")
-
-    init() {
-        if let data = try? Data(contentsOf: url),
-           let saved = try? JSONDecoder().decode([String: [DoodleComment]].self, from: data) {
-            comments = saved
-        } else if let data = try? Data(contentsOf: Self.folder.appendingPathComponent("doodles.json")),
-                  let old = try? JSONDecoder().decode([String: [Stroke]].self, from: data) {
-            // Drawings from the earlier version become your first comments.
-            comments = old.mapValues { [DoodleComment(author: "You", date: .now, strokes: $0)] }
-            save()
-        }
-    }
-
-    func comments(for postID: String) -> [DoodleComment] { comments[postID] ?? [] }
-
-    func post(_ strokes: [Stroke], by author: String, on postID: String) {
-        guard !strokes.isEmpty else { return }
-        comments[postID, default: []].append(DoodleComment(author: author, date: .now, strokes: strokes))
-        save()
-    }
-
-    func delete(_ commentID: UUID, on postID: String) {
-        comments[postID]?.removeAll { $0.id == commentID }
-        if comments[postID]?.isEmpty == true { comments[postID] = nil }
-        save()
-    }
-
-    private func save() {
-        if let data = try? JSONEncoder().encode(comments) {
-            try? data.write(to: url, options: .atomic)
-        }
-    }
 }
 
 /// Draws saved strokes over a picture.
@@ -293,117 +249,6 @@ final class DrawHaptics {
 }
 
 // MARK: - Touch handling
-
-/// Transparent UIKit layer over a post photo that turns a press-and-hold into
-/// drawing. Built on UIKit gesture recognizers so the feed always scrolls
-/// normally: a hold only starts once the finger has stayed still, and any
-/// earlier movement goes to the scroll view.
-struct DrawTouchLayer: UIViewRepresentable {
-    var isDrawing: Bool
-    var onHoldBegan: () -> Void
-    var onStroke: (CGPoint, CGSize, Date) -> Void
-    var onStrokeEnded: () -> Void
-    var onDoubleTap: () -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        view.backgroundColor = .clear
-        let c = context.coordinator
-        c.view = view
-
-        let hold = UILongPressGestureRecognizer(target: c, action: #selector(Coordinator.handleHold(_:)))
-        hold.minimumPressDuration = 0.32
-        hold.allowableMovement = 8
-        hold.delegate = c
-        view.addGestureRecognizer(hold)
-        c.hold = hold
-
-        let draw = ImmediatePanGestureRecognizer(target: c, action: #selector(Coordinator.handleDraw(_:)))
-        draw.maximumNumberOfTouches = 1
-        draw.isEnabled = false
-        view.addGestureRecognizer(draw)
-        c.draw = draw
-
-        let doubleTap = UITapGestureRecognizer(target: c, action: #selector(Coordinator.handleDoubleTap(_:)))
-        doubleTap.numberOfTapsRequired = 2
-        doubleTap.delegate = c
-        view.addGestureRecognizer(doubleTap)
-        return view
-    }
-
-    func updateUIView(_ view: UIView, context: Context) {
-        let c = context.coordinator
-        c.parent = self
-        c.hold?.isEnabled = !isDrawing
-        c.draw?.isEnabled = isDrawing
-        c.setScrollLocked(isDrawing)
-    }
-
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var parent: DrawTouchLayer?
-        weak var view: UIView?
-        weak var hold: UILongPressGestureRecognizer?
-        weak var draw: UIPanGestureRecognizer?
-        private weak var lockedScroll: UIScrollView?
-
-        @objc func handleHold(_ g: UILongPressGestureRecognizer) {
-            guard let view, let parent else { return }
-            let point = g.location(in: view)
-            switch g.state {
-            case .began:
-                setScrollLocked(true)
-                parent.onHoldBegan()
-                parent.onStroke(point, view.bounds.size, .now)
-            case .changed:
-                parent.onStroke(point, view.bounds.size, .now)
-            case .ended, .cancelled, .failed:
-                parent.onStrokeEnded()
-            default:
-                break
-            }
-        }
-
-        @objc func handleDraw(_ g: UIPanGestureRecognizer) {
-            guard let view, let parent else { return }
-            switch g.state {
-            case .began, .changed:
-                parent.onStroke(g.location(in: view), view.bounds.size, .now)
-            case .ended, .cancelled, .failed:
-                parent.onStrokeEnded()
-            default:
-                break
-            }
-        }
-
-        @objc func handleDoubleTap(_ g: UITapGestureRecognizer) {
-            parent?.onDoubleTap()
-        }
-
-        /// Stops the feed scrolling while drawing (and cancels a scroll
-        /// that may have started), then gives it back afterwards.
-        func setScrollLocked(_ locked: Bool) {
-            if locked {
-                guard lockedScroll == nil else { return }
-                var ancestor = view?.superview
-                while let current = ancestor, !(current is UIScrollView) { ancestor = current.superview }
-                guard let scroll = ancestor as? UIScrollView else { return }
-                scroll.panGestureRecognizer.isEnabled = false
-                lockedScroll = scroll
-            } else if let scroll = lockedScroll {
-                scroll.panGestureRecognizer.isEnabled = true
-                lockedScroll = nil
-            }
-        }
-
-        // Let the scroll view keep working alongside the hold and double-tap.
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
-                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-            true
-        }
-    }
-}
 
 /// A pan that starts the moment the finger touches, so strokes begin
 /// exactly where you put your finger down.

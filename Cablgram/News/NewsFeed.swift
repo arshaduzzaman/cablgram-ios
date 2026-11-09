@@ -40,9 +40,8 @@ final class NewsFeed: ObservableObject {
         await loadPage(replacing: true)
     }
 
-    /// Loads the next page when the last post scrolls into view.
-    func loadMoreIfNeeded(after post: NewsPost) async {
-        guard post.id == posts.last?.id else { return }
+    /// Loads the next page, if there is one.
+    func loadMore() async {
         await loadPage(replacing: false)
     }
 
