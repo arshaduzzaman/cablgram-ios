@@ -124,10 +124,21 @@ final class PhotoCache {
 
     func cached(_ url: String) -> UIImage? { cache.object(forKey: url as NSString) }
 
+    /// Photos are also kept on disk (up to 300 MB), so they show instantly
+    /// next time the app opens instead of downloading again.
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.urlCache = URLCache(memoryCapacity: 30_000_000, diskCapacity: 300_000_000,
+                                   directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                                       .appendingPathComponent("photos"))
+        config.requestCachePolicy = .returnCacheDataElseLoad
+        return URLSession(configuration: config)
+    }()
+
     func load(_ url: String) async -> UIImage? {
         if let hit = cached(url) { return hit }
         guard let link = URL(string: url),
-              let (data, _) = try? await URLSession.shared.data(from: link),
+              let (data, _) = try? await session.data(from: link),
               let image = UIImage(data: data) else { return nil }
         cache.setObject(image, forKey: url as NSString)
         return image

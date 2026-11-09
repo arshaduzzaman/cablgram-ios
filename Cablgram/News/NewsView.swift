@@ -72,7 +72,8 @@ struct NewsView: View {
             await feed.refresh()
         }
         .task {
-            if feed.posts.isEmpty { await feed.refresh() }
+            // Shows last time's posts straight away, then swaps in fresh ones.
+            await feed.refresh()
         }
         .onChange(of: onScreen) { _, ids in social.watch(ids) }
     }
