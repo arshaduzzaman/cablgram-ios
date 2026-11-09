@@ -82,7 +82,16 @@ struct GoalHero: View {
 
         return VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                StepsOrSponsor(remaining: remaining)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(remaining.formatted())
+                        .font(.system(size: 46, weight: .bold))
+                        .monospacedDigit()
+                        .contentTransition(.numericText(value: Double(remaining)))
+                        .animation(.smooth(duration: 0.8), value: remaining)
+                    Text("steps to go")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
 
                 RaceTrack(goal: goal, onOpenLeaderboard: onOpenLeaderboard)
             }

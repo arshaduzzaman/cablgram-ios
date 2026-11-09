@@ -2,8 +2,8 @@ import SwiftUI
 import MapKit
 import GoogleMaps
 
-/// Walking navigation in Cablgram colours: a pink turn banner on top, the
-/// map following you, and live steps toward your reward at the bottom.
+/// A walk in Cablgram colours: a pink banner on top, the map following you,
+/// and live steps toward your reward at the bottom.
 struct WalkNavigationView: View {
     @StateObject private var session: WalkSession
     @EnvironmentObject private var steps: StepStore
@@ -13,8 +13,8 @@ struct WalkNavigationView: View {
     @State private var stepsToGoalAtStart = 0
     @State private var lastMilestone = 0
 
-    init(walk: WalkSuggestion?, onEnd: @escaping (Int) -> Void) {
-        _session = StateObject(wrappedValue: WalkSession(walk: walk))
+    init(onEnd: @escaping (Int) -> Void) {
+        _session = StateObject(wrappedValue: WalkSession())
         self.onEnd = onEnd
     }
 
@@ -39,8 +39,6 @@ struct WalkNavigationView: View {
             await session.start()
         }
         .onDisappear { session.stop() }
-        .onChange(of: session.stepIndex) { _, _ in Haptics.press() }
-        .onChange(of: session.arrived) { _, arrived in if arrived { Haptics.celebrate() } }
         .onChange(of: session.walkedSteps) { _, walked in
             // A little buzz every 500 steps, and a celebration if this walk unlocks the reward.
             let milestone = walked / 500
@@ -58,28 +56,24 @@ struct WalkNavigationView: View {
 
     @ViewBuilder
     private var map: some View {
-        let line = session.route?.coordinates ?? []
         if GoogleMapsConfig.isEnabled {
-            NavGoogleMap(route: line, location: session.location, heading: session.heading)
+            NavGoogleMap(location: session.location, heading: session.heading)
         } else {
-            NavAppleMap(route: line)
+            NavAppleMap()
         }
     }
 
-    // MARK: - Turn banner
+    // MARK: - Banner
 
     private var banner: some View {
         HStack(spacing: 14) {
-            Image(systemName: bannerIcon)
+            Image(systemName: "figure.walk")
                 .font(.system(size: 30, weight: .bold))
                 .frame(width: 44)
             VStack(alignment: .leading, spacing: 2) {
-                if let title = bannerTitle {
-                    Text(title)
-                        .font(.title2.weight(.bold))
-                        .monospacedDigit()
-                }
-                Text(bannerText)
+                Text("Walking")
+                    .font(.title2.weight(.bold))
+                Text("Walk anywhere. Every step counts toward your reward.")
                     .font(.subheadline.weight(.medium))
                     .lineLimit(2)
                     .opacity(0.95)
@@ -90,30 +84,6 @@ struct WalkNavigationView: View {
         .padding(16)
         .background(Color.brand, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
-        .animation(.snappy, value: session.stepIndex)
-    }
-
-    private var bannerIcon: String {
-        if session.arrived { return "flag.checkered" }
-        if session.walk == nil { return "figure.walk" }
-        if session.isLoadingRoute { return "location.north.line.fill" }
-        guard let step = session.currentStep else { return "arrow.up" }
-        if session.isFinalStep && step.maneuver == "STRAIGHT" { return "flag.checkered" }
-        return Self.icon(for: step.maneuver)
-    }
-
-    private var bannerTitle: String? {
-        if session.arrived { return "You made it!" }
-        if session.walk == nil { return "Free walk" }
-        guard let meters = session.metersToTurn else { return session.isLoadingRoute ? nil : "Follow the pink line" }
-        return Self.distance(meters)
-    }
-
-    private var bannerText: String {
-        if session.arrived { return "Walk complete. Nice one 🎉" }
-        if session.walk == nil { return "Walk anywhere. Every step counts toward your reward." }
-        if session.isLoadingRoute { return "Getting directions…" }
-        return session.currentStep?.instruction ?? (session.walk?.title ?? "")
     }
 
     // MARK: - Bottom card
@@ -134,11 +104,11 @@ struct WalkNavigationView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if let remaining = session.remainingMeters, session.walk != nil, !session.arrived {
+                if session.walkedMeters > 0 {
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("\(max(Int((remaining / 1.3 / 60).rounded()), 1)) min")
+                        Text(Self.distance(session.walkedMeters))
                             .font(.title3.weight(.bold))
-                        Text("\(Self.distance(remaining)) left")
+                        Text(session.startDate, style: .timer)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -176,12 +146,12 @@ struct WalkNavigationView: View {
                 Haptics.warning()
                 onEnd(session.walkedSteps)
             } label: {
-                Text(session.arrived ? "Finish" : "End walk")
+                Text("End walk")
                     .font(.headline)
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
-                    .background(session.arrived ? Color.brand : Color.black, in: Capsule())
+                    .background(Color.black, in: Capsule())
             }
             .buttonStyle(.plain)
         }
@@ -198,19 +168,6 @@ struct WalkNavigationView: View {
     static func distance(_ meters: Double) -> String {
         if meters < 1_000 { return "\(Int((meters / 10).rounded() * 10)) m" }
         return String(format: "%.1f km", meters / 1_000)
-    }
-
-    static func icon(for maneuver: String) -> String {
-        switch maneuver {
-        case "TURN_LEFT", "TURN_SHARP_LEFT", "RAMP_LEFT", "FORK_LEFT": "arrow.turn.up.left"
-        case "TURN_RIGHT", "TURN_SHARP_RIGHT", "RAMP_RIGHT", "FORK_RIGHT": "arrow.turn.up.right"
-        case "TURN_SLIGHT_LEFT", "MERGE": "arrow.up.left"
-        case "TURN_SLIGHT_RIGHT": "arrow.up.right"
-        case "UTURN_LEFT", "UTURN_RIGHT": "arrow.uturn.down"
-        case "ROUNDABOUT_LEFT", "ROUNDABOUT_RIGHT": "arrow.triangle.turn.up.right.circle"
-        case "FERRY", "FERRY_TRAIN": "ferry"
-        default: "arrow.up"
-        }
     }
 }
 
@@ -229,18 +186,14 @@ private struct UserPuck: View {
     }
 }
 
-/// Google map that follows you, tilted, with the route in pink on a black-and-white map.
+/// Black-and-white Google map that follows you, tilted.
 private struct NavGoogleMap: UIViewRepresentable {
-    let route: [CLLocationCoordinate2D]
     let location: CLLocation?
     let heading: CLLocationDirection
 
     @Environment(\.displayScale) private var displayScale
 
     final class Coordinator {
-        var routeCount = -1
-        var outline: GMSPolyline?
-        var line: GMSPolyline?
         let puck = GMSMarker()
     }
 
@@ -266,51 +219,23 @@ private struct NavGoogleMap: UIViewRepresentable {
     }
 
     func updateUIView(_ map: GMSMapView, context: Context) {
-        let c = context.coordinator
-
-        if route.count != c.routeCount {
-            c.routeCount = route.count
-            c.outline?.map = nil
-            c.line?.map = nil
-            let path = GMSMutablePath()
-            route.forEach { path.add($0) }
-            let outline = GMSPolyline(path: path)
-            outline.strokeWidth = 11
-            outline.strokeColor = .white
-            outline.map = map
-            let line = GMSPolyline(path: path)
-            line.strokeWidth = 7
-            line.strokeColor = UIColor(Color.brand)
-            line.map = map
-            c.outline = outline
-            c.line = line
-            if location == nil, route.count > 1 {
-                map.animate(with: GMSCameraUpdate.fit(GMSCoordinateBounds(path: path), withPadding: 40))
-            }
-        }
-
-        if let location {
-            c.puck.position = location.coordinate
-            c.puck.rotation = heading
-            c.puck.map = map
-            map.animate(to: GMSCameraPosition(target: location.coordinate, zoom: 17.5,
-                                              bearing: heading, viewingAngle: 50))
-        }
+        guard let location else { return }
+        let puck = context.coordinator.puck
+        puck.position = location.coordinate
+        puck.rotation = heading
+        puck.map = map
+        map.animate(to: GMSCameraPosition(target: location.coordinate, zoom: 17.5,
+                                          bearing: heading, viewingAngle: 50))
     }
 }
 
 /// Apple Maps fallback when there's no Google key.
 private struct NavAppleMap: View {
-    let route: [CLLocationCoordinate2D]
     @State private var camera: MapCameraPosition = .userLocation(followsHeading: true, fallback: .automatic)
 
     var body: some View {
         Map(position: $camera) {
             UserAnnotation()
-            if route.count > 1 {
-                MapPolyline(coordinates: route).stroke(.white, lineWidth: 11)
-                MapPolyline(coordinates: route).stroke(Color.brand, lineWidth: 7)
-            }
         }
         .mapStyle(.standard(elevation: .realistic, pointsOfInterest: .excludingAll))
     }

@@ -58,7 +58,7 @@ struct MainView: View {
                 })
                     .opacity(tab == .news ? 1 : 0)
                     .allowsHitTesting(tab == .news)
-                WalkPage(isVisible: tab == .walk)
+                WalkPage()
                     .opacity(tab == .walk ? 1 : 0)
                     .allowsHitTesting(tab == .walk)
                 MenuView()

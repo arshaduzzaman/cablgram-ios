@@ -3,7 +3,7 @@
 SwiftUI app. Everyone signs in with Google first. The layout follows the Facebook app: a "cablgram" bar on top, icon tabs under it.
 
 - **News** (home icon): the Cablgram post feed from `https://www.cablgram.com/api/facebook-posts`, the same one the website shows. Pull to refresh, scroll for more, tap to open, or share.
-- **Walk**: everything about walking on one scrolling page: the reward you picked and steps to go, walk ideas (a map preview plus swipeable walks between your usual places, with a full-screen map), a leaderboard preview with "See all", and rewards. Uncle Bobo's Chicken (10,000), Liberty Pizza Slice and Smashed Chicken Burger (15,000), GTA 6 (75,000) and PlayStation 5 (500,000). Edit the list in `Cablgram/Walk/Rewards.swift`.
+- **Walk**: everything about walking on one scrolling page: the reward you picked and steps to go, a race to it against other walkers, a Start a walk button for a live walk on the map, a leaderboard preview with "See all", and rewards. Uncle Bobo's Chicken (10,000), Liberty Pizza Slice and Smashed Chicken Burger (15,000), GTA 6 (75,000) and PlayStation 5 (500,000). Edit the list in `Cablgram/Walk/Rewards.swift`.
 - **Menu**: your profile, stats, claimed rewards, a Haptics switch and sign out.
 
 Haptic feedback (`Cablgram/Shared/Haptics.swift`) plays on taps, selections and tab changes, and a celebration buzz plays when you claim or unlock a reward, reach a step milestone on a walk, or move up the leaderboard.
@@ -37,16 +37,14 @@ Steps are sent from the phone, so a determined cheater could fake them. The rule
 
 ## Maps: Google, with an Apple Maps fallback
 
-The Routes tab uses **Google Maps** (map, walking routes, place search) when an API key is set, the same platform inDrive uses. Without a key it falls back to Apple Maps. Apple Maps has no walking directions in Dhaka, so those routes are straight-line estimates (dashed, tagged "Estimated").
+A walk shows a black-and-white **Google Map** that follows you when an API key is set. Without a key it uses Apple Maps.
 
 To turn on Google Maps:
 
-1. In the [Google Cloud console](https://console.cloud.google.com/google/maps-apis), create a project with billing, and enable **Maps SDK for iOS**, **Routes API** and **Places API (New)**.
-2. Create an API key. Restrict it to iOS apps with bundle id `com.cablgram.app`, and to those three APIs.
+1. In the [Google Cloud console](https://console.cloud.google.com/google/maps-apis), create a project with billing and enable **Maps SDK for iOS**.
+2. Create an API key. Restrict it to iOS apps with bundle id `com.cablgram.app`.
 3. Copy `Secrets.example.xcconfig` to `Secrets.xcconfig` and paste the key. `Secrets.xcconfig` is git-ignored, so the key never lands on GitHub.
 4. Build and run.
-
-If Google rejects a request (wrong key, API not enabled), the error appears in red under the walk suggestions and the app falls back to Apple Maps.
 
 ## Run it
 
@@ -54,7 +52,7 @@ If Google rejects a request (wrong key, API not enabled), the error appears in r
 2. Open `Cablgram.xcodeproj` and pick an iPhone simulator. The first build downloads the Google Maps SDK.
 3. Press Run (⌘R).
 
-The Simulator has no real steps, so debug builds include buttons to add test steps, and a button on the Routes tab to load sample Dhaka places.
+The Simulator has no real steps, so debug builds include buttons to add test steps.
 
 To run on a real iPhone, choose your team under **Signing & Capabilities**. HealthKit is already turned on in `Cablgram.entitlements`.
 

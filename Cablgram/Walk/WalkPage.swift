@@ -1,23 +1,15 @@
 import SwiftUI
 
 /// Everything about walking on one scrolling page: your steps and goal,
-/// walk ideas on a map, the leaderboard, and rewards.
+/// the leaderboard, and rewards.
 struct WalkPage: View {
-    /// Whether the Walk tab is on screen. Location is only asked for once it is.
-    var isVisible = true
-
     @EnvironmentObject private var steps: StepStore
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var leaderboard: LeaderboardStore
     @Environment(\.scenePhase) private var scenePhase
 
-    @StateObject private var places = PlacesStore()
-    @StateObject private var planner = RoutePlanner()
-    @StateObject private var location = LocationTracker()
-
-    @State private var selectedID: WalkSuggestion.ID?
-    @State private var addingKind: SavedPlace.Kind?
-    @State private var showingMap = false
+    @State private var walking = false
+    @State private var finishedSteps: Int?
     @State private var showingLeaderboard = false
     @State private var showingGoalPicker = false
     @State private var justClaimed: Reward?
@@ -25,13 +17,12 @@ struct WalkPage: View {
     /// doesn't buzz for rewards or goals that were already reached.
     @State private var celebrationsReady = false
 
-    private var selected: WalkSuggestion? { planner.suggestions.first { $0.id == selectedID } }
     private var myRank: Int? { leaderboard.rank(of: auth.user?.uid) }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
-                GoalHero(onStartWalk: startWalk,
+                GoalHero(onStartWalk: { walking = true },
                          onChangeGoal: { showingGoalPicker = true },
                          onClaim: claim,
                          onOpenLeaderboard: { showingLeaderboard = true })
@@ -45,7 +36,6 @@ struct WalkPage: View {
                         .card()
                 }
 
-                walkIdeas
                 leaderboardPreview
                 rewards
 
@@ -64,15 +54,8 @@ struct WalkPage: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await steps.refresh() } }
         }
-        .task(id: places.places) {
-            selectedID = nil
-            await planner.plan(home: places.home, destinations: places.destinations)
-        }
         .onAppear {
             if steps.hasLoaded { celebrationsReady = true }
-        }
-        .onChange(of: isVisible, initial: true) { _, visible in
-            if visible { location.requestOnce() }
         }
         // Celebrate real progress, not the first load.
         .onChange(of: steps.hasLoaded) { _, loaded in
@@ -84,20 +67,27 @@ struct WalkPage: View {
         .onChange(of: myRank) { old, new in
             if celebrationsReady, let old, let new, new < old { Haptics.success() }
         }
-        .sheet(item: $addingKind) { kind in
-            AddPlaceView(initialKind: kind, currentLocation: location.lastLocation) { place in
-                places.add(place)
-                Haptics.success()
+        .fullScreenCover(isPresented: $walking) {
+            WalkNavigationView { walked in
+                walking = false
+                finishedSteps = walked
+                Task { await steps.refresh() }
             }
-            .presentationDetents([.large])
+            .environmentObject(steps)
+            .tint(.brand)
         }
-        .fullScreenCover(isPresented: $showingMap) {
-            RoutesView(selectedID: $selectedID, onClose: { showingMap = false })
-                .environmentObject(steps)
-                .environmentObject(places)
-                .environmentObject(planner)
-                .environmentObject(location)
-                .tint(.brand)
+        .alert("Nice walk! 🎉", isPresented: Binding(
+            get: { finishedSteps != nil },
+            set: { if !$0 { finishedSteps = nil } }
+        )) {
+            Button("Done") { finishedSteps = nil }
+        } message: {
+            let walked = finishedSteps ?? 0
+            if let goal = steps.goalReward {
+                Text("You walked \(walked.formatted()) steps. \(steps.stepsToGoal == 0 ? "\(goal.fullName) is ready to claim!" : "\(steps.stepsToGoal.formatted()) more to \(goal.fullName).")")
+            } else {
+                Text("You walked \(walked.formatted()) steps.")
+            }
         }
         .sheet(isPresented: $showingLeaderboard) {
             NavigationStack {
@@ -129,148 +119,6 @@ struct WalkPage: View {
                 message: Text("\(reward.fullName) is yours. You walked \(reward.steps.formatted()) steps for it."),
                 dismissButton: .default(Text("Nice"))
             )
-        }
-    }
-
-    // MARK: - Walk ideas (map + suggestions)
-
-    private var walkIdeas: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionTitle(title: "Walk ideas",
-                          actionTitle: places.home == nil ? nil : "Full map") {
-                showingMap = true
-            }
-
-            if places.home == nil {
-                prompt("Set your home to get walk ideas", systemImage: "house.fill") { addingKind = .home }
-            } else {
-                Button {
-                    Haptics.tap()
-                    showingMap = true
-                } label: {
-                    RouteMap(places: places.places, walk: selected, topInset: 0, interactive: false)
-                        .frame(height: 190)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(alignment: .bottomTrailing) {
-                            Label("Open map", systemImage: "arrow.up.left.and.arrow.down.right")
-                                .font(.caption.bold())
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(.regularMaterial, in: Capsule())
-                                .padding(10)
-                        }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Open the full map")
-
-                if places.destinations.isEmpty {
-                    prompt("Add places you go often", systemImage: "mappin.and.ellipse") { addingKind = .other }
-                } else if planner.isPlanning {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text("Finding walking routes…").foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 6)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(planner.ranked(toGoal: steps.stepsToGoal)) { walk in
-                                SuggestionCard(walk: walk,
-                                               reachesGoal: steps.stepsToGoal > 0 && walk.steps >= steps.stepsToGoal,
-                                               isSelected: walk.id == selectedID)
-                                    .frame(width: 270)
-                                    .onTapGesture {
-                                        Haptics.select()
-                                        withAnimation(.snappy) {
-                                            selectedID = selectedID == walk.id ? nil : walk.id
-                                        }
-                                    }
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 2)
-                    }
-                    .padding(.horizontal, -16)
-                }
-            }
-
-            placeChips
-
-            if steps.stepsToGoal > 0 {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "lightbulb.fill").foregroundStyle(.yellow)
-                    Text("Taking a rickshaw or bus? Get off 1 km early and walk the rest: about **+1,300 steps**.")
-                        .font(.subheadline)
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            }
-
-            if planner.suggestions.contains(where: \.isEstimate) {
-                Text("Dashed lines are straight-line estimates where no walking route was found.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if let error = planner.googleError {
-                Text("Google Maps: \(error)")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-        }
-    }
-
-    private var placeChips: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(places.places) { place in
-                        Label(place.name, systemImage: place.kind.systemImage)
-                            .font(.subheadline.weight(.medium))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color(.secondarySystemBackground), in: Capsule())
-                            .contextMenu {
-                                Button(role: .destructive) {
-                                    Haptics.warning()
-                                    places.remove(place)
-                                } label: {
-                                    Label("Remove", systemImage: "trash")
-                                }
-                            }
-                    }
-                    Button {
-                        Haptics.tap()
-                        addingKind = places.home == nil ? .home : .other
-                    } label: {
-                        Label("Add place", systemImage: "plus")
-                            .font(.subheadline.weight(.semibold))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.brand.opacity(0.12), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Color.brand)
-                }
-                .padding(.horizontal, 16)
-            }
-            .padding(.horizontal, -16)
-
-            if !places.places.isEmpty {
-                Text("Saved only on this phone. Long-press a place to remove it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            #if DEBUG
-            if places.places.isEmpty {
-                Button("Load sample Dhaka places (debug)") {
-                    Haptics.tap()
-                    places.addSampleDhakaPlaces()
-                }
-                .font(.caption)
-            }
-            #endif
         }
     }
 
@@ -346,32 +194,9 @@ struct WalkPage: View {
 
     // MARK: - Helpers
 
-    /// "Start a walk": open the map with the best walk picked, ready to go.
-    private func startWalk() {
-        if selectedID == nil {
-            selectedID = planner.ranked(toGoal: steps.stepsToGoal).first?.id
-        }
-        showingMap = true
-    }
-
     private func claim(_ reward: Reward) {
         steps.claim(reward)
         justClaimed = reward
-    }
-
-    private func prompt(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button {
-            Haptics.tap()
-            action()
-        } label: {
-            Label(title, systemImage: systemImage)
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .background(Color.brand.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(Color.brand)
     }
 
     #if DEBUG
