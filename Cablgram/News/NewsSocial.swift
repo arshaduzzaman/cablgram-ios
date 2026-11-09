@@ -12,13 +12,14 @@ struct SlapMark: Identifiable, Equatable {
     let angle: Double
 }
 
-/// Slaps, voice notes and burns on posts, shared through Firestore so everyone sees
+/// Slaps, voice notes, eggs and step-bought headlines on posts, shared through Firestore so everyone sees
 /// everyone's marks live:
 ///
 ///     newsPosts/{postId}                 { slaps }
 ///     newsPosts/{postId}/marks/{id}      { uid, x, y, a, at }
 ///     newsPosts/{postId}/voices/{id}     { uid, author, x, y, secs, audio, at }
-///     newsPosts/{postId}/burns/{id}      { uid, x, y, r, at }
+///     newsPosts/{postId}/eggs/{id}       { uid, x, y, at }
+///     newsPosts/{postId}/headlines/{id}  { uid, author, text, steps, at }
 ///
 /// Only the posts on screen are listened to. Without a signed-in
 /// user (or Firebase), marks stay on this phone for the session.
@@ -27,7 +28,9 @@ final class NewsSocial: ObservableObject {
     @Published private(set) var slapCounts: [String: Int] = [:]
     @Published private(set) var marks: [String: [SlapMark]] = [:]
     @Published private(set) var voices: [String: [VoiceNote]] = [:]
-    @Published private(set) var burns: [String: [BurnMark]] = [:]
+    @Published private(set) var eggs: [String: [EggMark]] = [:]
+    /// Headlines people paid steps for, most steps first.
+    @Published private(set) var headlines: [String: [Headline]] = [:]
 
     private var listeners: [String: [ListenerRegistration]] = [:]
 
@@ -42,7 +45,8 @@ final class NewsSocial: ObservableObject {
     func slapCount(_ postID: String) -> Int { slapCounts[postID] ?? 0 }
     func marks(_ postID: String) -> [SlapMark] { marks[postID] ?? [] }
     func voices(_ postID: String) -> [VoiceNote] { voices[postID] ?? [] }
-    func burns(_ postID: String) -> [BurnMark] { burns[postID] ?? [] }
+    func eggs(_ postID: String) -> [EggMark] { eggs[postID] ?? [] }
+    func headlines(_ postID: String) -> [Headline] { headlines[postID] ?? [] }
 
     // MARK: - Listening
 
@@ -96,23 +100,38 @@ final class NewsSocial: ObservableObject {
                     Task { @MainActor in self?.voices[id] = voices }
                 }
 
-            let burns = doc.collection("burns")
+            let eggs = doc.collection("eggs")
                 .order(by: "at", descending: true)
-                .limit(to: 300)
+                .limit(to: 150)
                 .addSnapshotListener { [weak self] snapshot, _ in
                     guard let documents = snapshot?.documents else { return }
-                    let burns = documents.reversed().map { burn in
-                        let data = burn.data()
-                        return BurnMark(id: burn.documentID,
-                                        x: Self.number(data["x"]),
-                                        y: Self.number(data["y"]),
-                                        r: Self.number(data["r"]),
-                                        uid: data["uid"] as? String)
+                    let eggs = documents.reversed().map { egg in
+                        let data = egg.data()
+                        return EggMark(id: egg.documentID,
+                                       x: Self.number(data["x"]),
+                                       y: Self.number(data["y"]),
+                                       uid: data["uid"] as? String)
                     }
-                    Task { @MainActor in self?.burns[id] = burns }
+                    Task { @MainActor in self?.eggs[id] = eggs }
                 }
 
-            listeners[id] = [count, marks, voices, burns]
+            let headlines = doc.collection("headlines")
+                .order(by: "steps", descending: true)
+                .limit(to: 10)
+                .addSnapshotListener { [weak self] snapshot, _ in
+                    guard let documents = snapshot?.documents else { return }
+                    let headlines = documents.map { line in
+                        let data = line.data()
+                        return Headline(id: line.documentID,
+                                        text: data["text"] as? String ?? "",
+                                        author: data["author"] as? String ?? "Someone",
+                                        steps: Int(Self.number(data["steps"])),
+                                        uid: data["uid"] as? String)
+                    }
+                    Task { @MainActor in self?.headlines[id] = headlines }
+                }
+
+            listeners[id] = [count, marks, voices, eggs, headlines]
         }
     }
 
@@ -168,20 +187,38 @@ final class NewsSocial: ObservableObject {
         post(postID).collection("voices").document(noteID).delete()
     }
 
-    /// Burns a hole of radius `r` (fraction of the photo's width) at `point`.
-    func burn(_ postID: String, at point: CGPoint, radius r: Double) {
-        let mark = BurnMark(id: UUID().uuidString,
-                            x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1),
-                            r: min(max(r, 0.02), 0.3), uid: uid)
+    /// Throws an egg at `point` (fractions of the photo). Returns its id so
+    /// the thrower's phone can animate the throw.
+    @discardableResult
+    func throwEgg(at point: CGPoint, on postID: String) -> String {
+        let egg = EggMark(id: UUID().uuidString,
+                          x: min(max(point.x, 0.03), 0.97), y: min(max(point.y, 0.03), 0.97), uid: uid)
         guard let uid else {
-            burns[postID, default: []].append(mark)
+            eggs[postID, default: []].append(egg)
+            return egg.id
+        }
+        post(postID).collection("eggs").document(egg.id).setData([
+            "uid": uid,
+            "x": Self.round(egg.x),
+            "y": Self.round(egg.y),
+            "at": FieldValue.serverTimestamp(),
+        ])
+        return egg.id
+    }
+
+    /// Puts up a headline paid for with `steps` (already spent by the caller).
+    func postHeadline(_ text: String, steps: Int, by author: String, on postID: String) {
+        let line = Headline(id: UUID().uuidString, text: text, author: author, steps: steps, uid: uid)
+        guard let uid else {
+            headlines[postID, default: []].append(line)
+            headlines[postID]?.sort { $0.steps > $1.steps }
             return
         }
-        post(postID).collection("burns").document(mark.id).setData([
+        post(postID).collection("headlines").document(line.id).setData([
             "uid": uid,
-            "x": Self.round(mark.x),
-            "y": Self.round(mark.y),
-            "r": Self.round(mark.r),
+            "author": author,
+            "text": text,
+            "steps": steps,
             "at": FieldValue.serverTimestamp(),
         ])
     }
@@ -195,4 +232,22 @@ final class NewsSocial: ObservableObject {
     private nonisolated static func round(_ value: CGFloat) -> Double {
         (Double(value) * 10_000).rounded() / 10_000
     }
+}
+
+/// A headline someone wrote for a post, paid for in steps. The one with
+/// the most steps behind it is shown on the post.
+struct Headline: Identifiable, Equatable {
+    let id: String
+    let text: String
+    let author: String
+    let steps: Int
+    let uid: String?
+
+    var firstName: String { author.components(separatedBy: " ").first ?? author }
+
+    /// The least a headline can cost.
+    static let minimumSteps = 500
+    /// How much more than the current top headline it takes to replace it.
+    static let outbidBy = 100
+    static let maxLength = 80
 }

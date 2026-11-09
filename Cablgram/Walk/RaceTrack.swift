@@ -11,7 +11,7 @@ struct RaceTrack: View {
     @EnvironmentObject private var auth: AuthStore
 
     private var racers: [Racer] {
-        leaderboard.race(for: goal, yourSteps: steps.totalSteps, uid: auth.user?.uid,
+        leaderboard.race(for: goal, yourSteps: steps.availableSteps, uid: auth.user?.uid,
                          name: auth.user?.displayName ?? "You", photoURL: auth.user?.photoURL)
     }
 
@@ -27,10 +27,10 @@ struct RaceTrack: View {
                 .frame(height: 58)
 
             HStack {
-                Text("\(steps.totalSteps.formatted()) of \(goal.steps.formatted()) steps")
-                    .contentTransition(.numericText(value: Double(steps.totalSteps)))
+                Text("\(steps.availableSteps.formatted()) of \(goal.steps.formatted()) steps")
+                    .contentTransition(.numericText(value: Double(steps.availableSteps)))
                 Spacer()
-                Text("\(Int(min(Double(steps.totalSteps) / Double(goal.steps), 1) * 100))%")
+                Text("\(Int(min(Double(steps.availableSteps) / Double(goal.steps), 1) * 100))%")
                     .fontWeight(.semibold)
                     .foregroundStyle(Color.brand)
             }
@@ -47,8 +47,8 @@ struct RaceTrack: View {
             .buttonStyle(.plain)
         }
         .animation(.smooth(duration: 0.9), value: all.map(\.steps))
-        .onAppear { leaderboard.prepareRace(for: goal, yourSteps: steps.totalSteps) }
-        .onChange(of: goal.id) { _, _ in leaderboard.prepareRace(for: goal, yourSteps: steps.totalSteps) }
+        .onAppear { leaderboard.prepareRace(for: goal, yourSteps: steps.availableSteps) }
+        .onChange(of: goal.id) { _, _ in leaderboard.prepareRace(for: goal, yourSteps: steps.availableSteps) }
     }
 
     // MARK: - Track

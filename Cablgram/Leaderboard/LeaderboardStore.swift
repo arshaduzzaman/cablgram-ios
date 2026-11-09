@@ -10,6 +10,8 @@ struct LeaderboardEntry: Identifiable, Equatable {
     var weekSteps: Int
     /// Week (e.g. 2026-W45) that `weekSteps` belongs to.
     let week: String
+    /// Steps spent on eggs and headlines (kept so it follows you between phones).
+    var spentSteps: Int = 0
 }
 
 /// Someone in the race to your goal reward, and how far along they are.
@@ -49,7 +51,7 @@ final class LeaderboardStore: ObservableObject {
         startSimulation()
         #endif
     }
-    private var lastUploaded: (uid: String, total: Int, week: Int)?
+    private var lastUploaded: (uid: String, total: Int, week: Int, spent: Int)?
 
     static var weekKey: String {
         let formatter = DateFormatter()
@@ -74,7 +76,8 @@ final class LeaderboardStore: ObservableObject {
                         photoURL: (data["photoURL"] as? String).flatMap(URL.init(string:)),
                         totalSteps: (data["totalSteps"] as? NSNumber)?.intValue ?? 0,
                         weekSteps: (data["weekSteps"] as? NSNumber)?.intValue ?? 0,
-                        week: data["week"] as? String ?? ""
+                        week: data["week"] as? String ?? "",
+                        spentSteps: (data["spentSteps"] as? NSNumber)?.intValue ?? 0
                     )
                 }
                 let message = error?.localizedDescription
@@ -92,17 +95,19 @@ final class LeaderboardStore: ObservableObject {
     }
 
     /// Saves the signed-in user's steps, skipping writes when nothing changed.
-    func upload(totalSteps: Int, weekSteps: Int) {
+    func upload(totalSteps: Int, weekSteps: Int, spentSteps: Int) {
         guard AuthStore.isConfigured, let user = Auth.auth().currentUser else { return }
-        if let last = lastUploaded, last.uid == user.uid, last.total == totalSteps, last.week == weekSteps {
+        if let last = lastUploaded, last.uid == user.uid, last.total == totalSteps,
+           last.week == weekSteps, last.spent == spentSteps {
             return
         }
-        lastUploaded = (user.uid, totalSteps, weekSteps)
+        lastUploaded = (user.uid, totalSteps, weekSteps, spentSteps)
 
         var data: [String: Any] = [
             "name": user.displayName ?? "Walker",
             "totalSteps": totalSteps,
             "weekSteps": weekSteps,
+            "spentSteps": spentSteps,
             "week": Self.weekKey,
             "updatedAt": FieldValue.serverTimestamp(),
         ]

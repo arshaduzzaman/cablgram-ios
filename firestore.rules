@@ -19,10 +19,19 @@ service cloud.firestore {
         && request.resource.data.totalSteps <= 5000000
         && request.resource.data.weekSteps is int
         && request.resource.data.weekSteps >= 0
-        && request.resource.data.weekSteps <= 1000000;
+        && request.resource.data.weekSteps <= 1000000
+        // Steps spent on eggs and headlines: never more than walked, and
+        // never going back down.
+        && (!('spentSteps' in request.resource.data)
+            || (request.resource.data.spentSteps is int
+                && request.resource.data.spentSteps >= 0
+                && request.resource.data.spentSteps <= request.resource.data.totalSteps
+                && (resource == null
+                    || !('spentSteps' in resource.data)
+                    || request.resource.data.spentSteps >= resource.data.spentSteps)));
     }
 
-    // News feed: shared slaps, voice notes and burns on each post.
+    // News feed: shared slaps, voice notes, eggs and headlines on each post.
     match /newsPosts/{postId} {
       allow read: if request.auth != null;
 
@@ -70,18 +79,33 @@ service cloud.firestore {
           && resource.data.uid == request.auth.uid;
       }
 
-      // A hole someone burned through the photo. Burns are permanent.
-      match /burns/{burnId} {
+      // A rotten egg someone threw at the photo (it costs them steps).
+      match /eggs/{eggId} {
         allow read: if request.auth != null;
         allow create: if request.auth != null
-          && request.resource.data.keys().hasOnly(['uid', 'x', 'y', 'r', 'at'])
+          && request.resource.data.keys().hasOnly(['uid', 'x', 'y', 'at'])
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.x is number
           && request.resource.data.x >= 0 && request.resource.data.x <= 1
           && request.resource.data.y is number
           && request.resource.data.y >= 0 && request.resource.data.y <= 1
-          && request.resource.data.r is number
-          && request.resource.data.r >= 0.02 && request.resource.data.r <= 0.3
+          && request.resource.data.at == request.time;
+      }
+
+      // A headline someone paid steps for. The most steps goes on top.
+      match /headlines/{headlineId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null
+          && request.resource.data.keys().hasOnly(['uid', 'author', 'text', 'steps', 'at'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.author is string
+          && request.resource.data.author.size() <= 80
+          && request.resource.data.text is string
+          && request.resource.data.text.size() >= 3
+          && request.resource.data.text.size() <= 80
+          && request.resource.data.steps is int
+          && request.resource.data.steps >= 500
+          && request.resource.data.steps <= 5000000
           && request.resource.data.at == request.time;
       }
     }

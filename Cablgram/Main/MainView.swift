@@ -71,16 +71,24 @@ struct MainView: View {
         .task(id: auth.user?.uid) {
             if auth.user != nil {
                 leaderboard.startListening()
-                leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek)
+                leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
             } else {
                 leaderboard.stopListening()
             }
         }
         .onChange(of: steps.totalSteps) { _, _ in
-            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek)
+            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
         }
         .onChange(of: steps.stepsThisWeek) { _, _ in
-            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek)
+            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
+        }
+        .onChange(of: steps.spentSteps) { _, _ in
+            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
+        }
+        .onChange(of: leaderboard.entries) { _, entries in
+            if let mine = entries.first(where: { $0.id == auth.user?.uid }) {
+                steps.adoptSpentSteps(mine.spentSteps)
+            }
         }
     }
 }

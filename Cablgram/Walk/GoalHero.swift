@@ -32,7 +32,9 @@ struct GoalHero: View {
             HStack {
                 Text("This week **\(steps.stepsThisWeek.formatted())** steps")
                 Spacer()
-                Text("Total **\(steps.totalSteps.formatted())**")
+                Text(steps.spentSteps > 0
+                     ? "Walked **\(steps.totalSteps.formatted())** · spent \(steps.spentSteps.formatted())"
+                     : "Total **\(steps.totalSteps.formatted())**")
             }
             .font(.footnote)
             .foregroundStyle(.secondary)
@@ -75,7 +77,7 @@ struct GoalHero: View {
     }
 
     private func progress(_ goal: Reward) -> some View {
-        let remaining = max(goal.steps - steps.totalSteps, 0)
+        let remaining = max(goal.steps - steps.availableSteps, 0)
         let pace = steps.dailyPace
         let days = pace >= 500 ? Int((Double(remaining) / Double(pace)).rounded(.up)) : nil
         let minutes = Int((Double(remaining) / stepsPerMinute).rounded())
@@ -156,7 +158,7 @@ struct GoalPicker: View {
         NavigationStack {
             List {
                 ForEach(Reward.all.filter { !steps.isClaimed($0) }) { reward in
-                    let remaining = max(reward.steps - steps.totalSteps, 0)
+                    let remaining = max(reward.steps - steps.availableSteps, 0)
                     let isGoal = reward.id == steps.goalReward?.id
                     Button {
                         Haptics.select()

@@ -27,12 +27,12 @@ struct RewardCard: View {
                         .foregroundStyle(Color.brand)
                 }
                 if !unlocked {
-                    GradientProgressBar(fraction: Double(steps.totalSteps) / Double(reward.steps))
+                    GradientProgressBar(fraction: Double(steps.availableSteps) / Double(reward.steps))
                         .padding(.vertical, 3)
                 }
                 Text(unlocked
                      ? "\(reward.steps.formatted()) steps"
-                     : "\(steps.totalSteps.formatted()) of \(reward.steps.formatted()) steps")
+                     : "\(steps.availableSteps.formatted()) of \(reward.steps.formatted()) steps")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()

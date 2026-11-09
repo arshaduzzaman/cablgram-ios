@@ -1,6 +1,5 @@
 import Foundation
 import AVFoundation
-import CoreHaptics
 
 // MARK: - Shared marks
 
@@ -17,15 +16,6 @@ struct VoiceNote: Identifiable, Equatable {
     var firstName: String { author.components(separatedBy: " ").first ?? author }
 
     static func == (lhs: VoiceNote, rhs: VoiceNote) -> Bool { lhs.id == rhs.id }
-}
-
-/// A hole someone burned through a photo. `r` is a fraction of its width.
-struct BurnMark: Identifiable, Equatable {
-    let id: String
-    let x: Double
-    let y: Double
-    let r: Double
-    let uid: String?
 }
 
 // MARK: - Recording
@@ -171,77 +161,5 @@ final class VoicePlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in self.next() }
-    }
-}
-
-// MARK: - Burn haptics
-
-/// Fire you can feel: a low rumble that grows the longer you hold, with
-/// random crackles on top, and a soft puff when you let go.
-@MainActor
-final class BurnHaptics {
-    private var engine: CHHapticEngine?
-    private var rumble: CHHapticAdvancedPatternPlayer?
-    private var crackle: Timer?
-    private var started = Date()
-    private let supported = CHHapticEngine.capabilitiesForHardware().supportsHaptics
-
-    private var enabled: Bool { supported && Haptics.isEnabled }
-
-    func ignite() {
-        guard enabled else { return }
-        if engine == nil {
-            engine = try? CHHapticEngine()
-            engine?.playsHapticsOnly = true
-            try? engine?.start()
-        }
-        started = .now
-        play([transient(intensity: 1, sharpness: 0.3)])
-
-        let hum = CHHapticEvent(eventType: .hapticContinuous, parameters: [
-            CHHapticEventParameter(parameterID: .hapticIntensity, value: 1),
-            CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.12),
-        ], relativeTime: 0, duration: 30)
-        if let pattern = try? CHHapticPattern(events: [hum], parameters: []),
-           let player = try? engine?.makeAdvancedPlayer(with: pattern) {
-            try? player.start(atTime: CHHapticTimeImmediate)
-            rumble = player
-        }
-        crackle = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tick() }
-        }
-        tick()
-    }
-
-    private func tick() {
-        let heat = Float(min(Date.now.timeIntervalSince(started) / 3, 1))
-        try? rumble?.sendParameters([
-            CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: 0.25 + heat * 0.6, relativeTime: 0),
-            CHHapticDynamicParameter(parameterID: .hapticSharpnessControl, value: 0.1 + heat * 0.25, relativeTime: 0),
-        ], atTime: CHHapticTimeImmediate)
-        if Float.random(in: 0...1) < 0.35 + heat * 0.4 {
-            play([transient(intensity: Float.random(in: 0.3...0.9), sharpness: Float.random(in: 0.7...1))])
-        }
-    }
-
-    func extinguish() {
-        crackle?.invalidate()
-        crackle = nil
-        try? rumble?.stop(atTime: CHHapticTimeImmediate)
-        rumble = nil
-        guard enabled else { return }
-        play([transient(intensity: 0.5, sharpness: 0.15)])
-    }
-
-    private func transient(intensity: Float, sharpness: Float) -> CHHapticEvent {
-        CHHapticEvent(eventType: .hapticTransient, parameters: [
-            CHHapticEventParameter(parameterID: .hapticIntensity, value: intensity),
-            CHHapticEventParameter(parameterID: .hapticSharpness, value: sharpness),
-        ], relativeTime: 0)
-    }
-
-    private func play(_ events: [CHHapticEvent]) {
-        guard let engine, let pattern = try? CHHapticPattern(events: events, parameters: []) else { return }
-        try? engine.makePlayer(with: pattern).start(atTime: CHHapticTimeImmediate)
     }
 }

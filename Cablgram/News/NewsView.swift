@@ -3,8 +3,9 @@ import UIKit
 
 /// Cablgram's posts as a Threads-style feed: flat rows, hairlines between
 /// them, and the photo itself is the control. Double-tap to slap; hold to
-/// get 🔥 and 🎙, then slide onto one: burn a hole right where you pressed,
-/// or talk and pin a voice note there. Everything is shared live.
+/// get 🥚 🎙 ✍️ and slide onto one: throw a rotten egg where you pressed,
+/// talk and pin a voice note there, or spend steps on a headline.
+/// Everything is shared live.
 struct NewsView: View {
     var openWalk: () -> Void = {}
 
@@ -33,8 +34,10 @@ struct NewsView: View {
                     PostRow(post: post,
                             slapCount: social.slapCount(post.id),
                             voices: social.voices(post.id),
-                            burns: social.burns(post.id),
+                            eggs: social.eggs(post.id),
+                            headlines: social.headlines(post.id),
                             myID: auth.user?.uid,
+                            availableSteps: steps.availableSteps,
                             recorder: recorder,
                             player: player,
                             onSlap: { spot in social.slap(post.id, at: spot) },
@@ -43,7 +46,11 @@ struct NewsView: View {
                                                  by: auth.displayName, on: post.id)
                             },
                             onDeleteVoice: { id in social.deleteVoice(id, on: post.id) },
-                            onBurn: { spot, radius in social.burn(post.id, at: spot, radius: radius) })
+                            spend: { amount in steps.spend(amount) },
+                            onThrowEgg: { spot in social.throwEgg(at: spot, on: post.id) },
+                            onHeadline: { text, amount in
+                                social.postHeadline(text, steps: amount, by: auth.displayName, on: post.id)
+                            })
                         .hairline()
                         .onAppear {
                             if !onScreen.contains(post.id) { onScreen.append(post.id) }
@@ -114,28 +121,37 @@ struct NewsView: View {
 /// What a hold on the photo is doing.
 private enum HoldMode: Equatable {
     case idle
-    /// 🔥 and 🎙 are showing; slide onto one.
+    /// 🥚 🎙 ✍️ are showing; slide onto one.
     case choosing
-    case burning
+    /// Finger is on 🥚: let go to throw.
+    case eggReady
     case recording
+    /// Finger is on ✍️: let go to write a headline.
+    case headlineReady
 }
 
-private enum HoldChoice { case burn, voice }
+private enum HoldChoice { case egg, voice, headline }
 
-/// One post: Cablgram's avatar on the left, then name, time, the photo
-/// (with everyone's burns and voice notes on it), and a slim counts row.
+/// One post: Cablgram's avatar on the left, then name, time, the headline
+/// people paid steps for, the photo (with everyone's eggs and voice notes
+/// on it), and a slim counts row.
 private struct PostRow: View {
     let post: NewsPost
     let slapCount: Int
     let voices: [VoiceNote]
-    let burns: [BurnMark]
+    let eggs: [EggMark]
+    let headlines: [Headline]
     let myID: String?
+    let availableSteps: Int
     @ObservedObject var recorder: VoiceRecorder
     @ObservedObject var player: VoicePlayer
     let onSlap: (CGPoint) -> Void
     let onVoice: (CGPoint, Data, Double) -> Void
     let onDeleteVoice: (String) -> Void
-    let onBurn: (CGPoint, Double) -> Void
+    /// Spends steps; returns whether there were enough.
+    let spend: (Int) -> Bool
+    let onThrowEgg: (CGPoint) -> String
+    let onHeadline: (String, Int) -> Void
 
     @State private var image: UIImage?
     @State private var loadFailed = false
@@ -145,12 +161,14 @@ private struct PostRow: View {
     /// Where the hold started, as fractions of the photo.
     @State private var pressPoint: CGPoint?
     @State private var hovered: HoldChoice?
-    @State private var burnStart: Date?
-    @State private var burnHaptics = BurnHaptics()
     @State private var notice: String?
+    @State private var showHeadlines = false
 
-    /// Past this much burned away, the post is ash for everyone.
-    private static let ashLine = 0.5
+    /// Eggs flying or landing right now.
+    @State private var landing: [String: EggLanding] = [:]
+    /// Eggs already on the photo when it appeared (they don't animate).
+    @State private var knownEggs: Set<String>?
+    @State private var eggHaptics = EggHaptics()
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -170,6 +188,10 @@ private struct PostRow: View {
                     }
                 }
 
+                if let top = headlines.first {
+                    headline(top)
+                }
+
                 photo
 
                 actions
@@ -179,6 +201,49 @@ private struct PostRow: View {
         .padding(.top, 14)
         .padding(.bottom, 10)
         .onDisappear { cancelHold() }
+        .onChange(of: eggs.map(\.id), initial: true) { _, ids in noticeNewEggs(ids) }
+        .sheet(isPresented: $showHeadlines) {
+            HeadlineSheet(headlines: headlines, availableSteps: availableSteps) { text, steps in
+                guard spend(steps) else { return false }
+                onHeadline(text, steps)
+                Haptics.celebrate()
+                return true
+            }
+            .presentationDetents([.medium, .large])
+        }
+    }
+
+    // MARK: - Headline
+
+    /// The headline with the most steps behind it. Tap to see the rest or
+    /// write a better one.
+    private func headline(_ top: Headline) -> some View {
+        Button {
+            Haptics.tap()
+            showHeadlines = true
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(top.text)
+                    .font(.system(size: 19, weight: .heavy))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 4) {
+                    Image(systemName: "pencil.line")
+                    Text("\(top.firstName) · \(top.steps.formatted()) steps")
+                        .monospacedDigit()
+                    if headlines.count > 1 {
+                        Text("· \(headlines.count - 1) more")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("See all headlines or write your own")
     }
 
     // MARK: - Photo
@@ -186,28 +251,18 @@ private struct PostRow: View {
     private var photo: some View {
         Group {
             if let image {
-                let ash = burnedFraction(aspect: image.size.height / max(image.size.width, 1)) >= Self.ashLine
-                TimelineView(.animation(paused: burnStart == nil)) { timeline in
-                    let active = activeBurn(at: timeline.date)
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .grayscale(ash ? 1 : 0)
-                        .brightness(ash ? -0.2 : 0)
-                        .overlay {
-                            BurnScars(burns: burns, active: active,
-                                      time: timeline.date.timeIntervalSinceReferenceDate)
-                        }
-                        .mask { holes(active: active) }
-                }
-                .overlay { pins }
-                .overlay {
-                    PhotoTouchLayer(onHoldBegan: holdBegan,
-                                    onHoldMoved: holdMoved,
-                                    onHoldEnded: holdEnded,
-                                    onDoubleTap: doubleTap)
-                }
-                .overlay { holdOverlay }
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .overlay { EggLayer(eggs: eggs, landing: landing) }
+                    .overlay { pins }
+                    .overlay {
+                        PhotoTouchLayer(onHoldBegan: holdBegan,
+                                        onHoldMoved: holdMoved,
+                                        onHoldEnded: holdEnded,
+                                        onDoubleTap: doubleTap)
+                    }
+                    .overlay { holdOverlay }
             } else {
                 ZStack {
                     Color(.secondarySystemBackground)
@@ -246,19 +301,6 @@ private struct PostRow: View {
         }
     }
 
-    /// Cuts the burn holes right through the photo.
-    private func holes(active: BurnMark?) -> some View {
-        Canvas { context, size in
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.black))
-            context.blendMode = .clear
-            for burn in burns + [active].compactMap({ $0 }) {
-                let center = CGPoint(x: burn.x * size.width, y: burn.y * size.height)
-                context.fill(BurnScars.ragged(center: center, radius: burn.r * size.width, seed: burn.id),
-                             with: .color(.black))
-            }
-        }
-    }
-
     /// Voice notes pinned where they were recorded, and the recording pulse.
     private var pins: some View {
         GeometryReader { geo in
@@ -280,17 +322,27 @@ private struct PostRow: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: voices.map(\.id))
     }
 
-    /// 🔥 and 🎙 above your finger while choosing, like Facebook reactions.
+    /// 🥚 🎙 ✍️ above your finger while choosing, like Facebook reactions,
+    /// and a target where the egg will land.
     @ViewBuilder
     private var holdOverlay: some View {
-        if mode == .choosing {
+        if mode == .choosing || mode == .eggReady || mode == .headlineReady {
             GeometryReader { geo in
-                HStack(spacing: 14) {
-                    choiceBubble(.burn, icon: "flame.fill", title: "Burn", color: .orange)
-                    choiceBubble(.voice, icon: "mic.fill", title: "Voice", color: .brand)
+                if let pressPoint, mode != .headlineReady {
+                    Circle()
+                        .strokeBorder(Color.brand, style: StrokeStyle(lineWidth: 3, dash: [6, 5]))
+                        .frame(width: 54, height: 54)
+                        .background(Circle().fill(.white.opacity(0.15)))
+                        .scaleEffect(mode == .eggReady ? 1.15 : 1)
+                        .position(x: pressPoint.x * geo.size.width, y: pressPoint.y * geo.size.height)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+                HStack(spacing: 10) {
+                    choiceBubble(.egg, emoji: "🥚", title: "Egg · \(EggPrice.steps)")
+                    choiceBubble(.voice, emoji: "🎙️", title: "Voice")
+                    choiceBubble(.headline, emoji: "✍️", title: "Headline")
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
                 .background(.white, in: Capsule())
                 .shadow(color: .black.opacity(0.25), radius: 14, y: 6)
                 .position(menuCenter(in: geo.size))
@@ -300,29 +352,39 @@ private struct PostRow: View {
         }
     }
 
-    private func choiceBubble(_ choice: HoldChoice, icon: String, title: String, color: Color) -> some View {
+    private func choiceBubble(_ choice: HoldChoice, emoji: String, title: String) -> some View {
         let isHovered = hovered == choice
-        return VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(.white)
+        return VStack(spacing: 3) {
+            Text(emoji)
+                .font(.system(size: 30))
                 .frame(width: 50, height: 50)
-                .background(color, in: Circle())
+                .background(isHovered ? Color.brand.opacity(0.15) : Color(.secondarySystemBackground), in: Circle())
             Text(title)
-                .font(.caption2.weight(.bold))
+                .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(.black)
+                .lineLimit(1)
+                .fixedSize()
         }
-        .scaleEffect(isHovered ? 1.35 : 1, anchor: .bottom)
+        .frame(width: 58)
+        .scaleEffect(isHovered ? 1.3 : 1, anchor: .bottom)
         .animation(.spring(response: 0.25, dampingFraction: 0.55), value: isHovered)
     }
 
     /// Where the menu sits: above the finger, kept inside the photo.
     private func menuCenter(in size: CGSize) -> CGPoint {
         guard let pressPoint else { return CGPoint(x: size.width / 2, y: size.height / 2) }
-        let x = min(max(pressPoint.x * size.width, 90), size.width - 90)
-        var y = pressPoint.y * size.height - 80
-        if y < 50 { y = pressPoint.y * size.height + 80 }
+        let x = min(max(pressPoint.x * size.width, 112), size.width - 112)
+        var y = pressPoint.y * size.height - 86
+        if y < 50 { y = pressPoint.y * size.height + 86 }
         return CGPoint(x: x, y: min(y, size.height - 50))
+    }
+
+    /// Centre of each bubble in the menu, for working out which one the
+    /// finger is on.
+    private func spot(_ choice: HoldChoice, in size: CGSize) -> CGPoint {
+        let center = menuCenter(in: size)
+        let offset: CGFloat = switch choice { case .egg: -68; case .voice: 0; case .headline: 68 }
+        return CGPoint(x: center.x + offset, y: center.y - 6)
     }
 
     // MARK: - Counts row
@@ -351,18 +413,18 @@ private struct PostRow: View {
                 .buttonStyle(.plain)
             }
 
-            if !burns.isEmpty {
-                let people = Set(burns.map { $0.uid ?? $0.id }).count
-                HStack(spacing: 4) {
-                    Image(systemName: "flame.fill")
+            if !eggs.isEmpty {
+                HStack(spacing: 3) {
+                    Text("🥚")
                         .font(.system(size: 15))
-                        .foregroundStyle(.orange)
-                    Text(people.formatted())
+                    Text(eggs.count.formatted())
                         .font(.subheadline.weight(.medium).monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .contentTransition(.numericText(value: Double(eggs.count)))
                 }
+                .animation(.snappy, value: eggs.count)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(people == 1 ? "Burned by 1 person" : "Burned by \(people) people")
+                .accessibilityLabel(eggs.count == 1 ? "1 egg thrown" : "\(eggs.count) eggs thrown")
             }
 
             Spacer(minLength: 0)
@@ -371,6 +433,7 @@ private struct PostRow: View {
                 .font(.caption)
                 .foregroundStyle(notice == nil && mode == .idle ? .tertiary : .secondary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .animation(.snappy, value: hint)
         }
     }
@@ -378,10 +441,11 @@ private struct PostRow: View {
     private var hint: String {
         if let notice { return notice }
         switch mode {
-        case .choosing: return "Slide to Burn or Voice"
-        case .burning: return "Burning… let go to stop"
+        case .choosing: return "Slide to Egg, Voice or Headline"
+        case .eggReady: return "Let go to throw · \(EggPrice.steps) steps"
         case .recording: return "Talking… let go to pin it"
-        case .idle: return voices.isEmpty && burns.isEmpty ? "Hold the photo" : ""
+        case .headlineReady: return "Let go to write a headline"
+        case .idle: return voices.isEmpty && eggs.isEmpty && headlines.isEmpty ? "Hold the photo" : ""
         }
     }
 
@@ -411,29 +475,29 @@ private struct PostRow: View {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) { mode = .choosing }
     }
 
-    /// While choosing, the finger picks 🔥 or 🎙; touching one starts it.
+    /// The finger picks a bubble. Voice starts recording straight away; Egg
+    /// and Headline wait for you to let go, and sliding off cancels them.
     private func holdMoved(to point: CGPoint, in size: CGSize) {
-        guard mode == .choosing else { return }
-        let center = menuCenter(in: size)
-        let burnSpot = CGPoint(x: center.x - 32, y: center.y - 6)
-        let voiceSpot = CGPoint(x: center.x + 32, y: center.y - 6)
-        let reach: CGFloat = 38
-        let choice: HoldChoice? =
-            hypot(point.x - burnSpot.x, point.y - burnSpot.y) < reach ? .burn :
-            hypot(point.x - voiceSpot.x, point.y - voiceSpot.y) < reach ? .voice : nil
+        guard mode == .choosing || mode == .eggReady || mode == .headlineReady else { return }
+        let reach: CGFloat = 36
+        let choice = [HoldChoice.egg, .voice, .headline].first { choice in
+            let c = spot(choice, in: size)
+            return hypot(point.x - c.x, point.y - c.y) < reach
+        }
         guard choice != hovered else { return }
         hovered = choice
         switch choice {
-        case .burn: startBurning()
-        case .voice: startRecording()
-        case nil: break
+        case .egg:
+            Haptics.select()
+            withAnimation(.snappy) { mode = .eggReady }
+        case .headline:
+            Haptics.select()
+            withAnimation(.snappy) { mode = .headlineReady }
+        case .voice:
+            startRecording()
+        case nil:
+            withAnimation(.snappy) { mode = .choosing }
         }
-    }
-
-    private func startBurning() {
-        burnStart = .now
-        burnHaptics.ignite()
-        withAnimation(.snappy) { mode = .burning }
     }
 
     private func startRecording() {
@@ -456,11 +520,8 @@ private struct PostRow: View {
 
     private func holdEnded() {
         switch mode {
-        case .burning:
-            if let pressPoint, let burnStart {
-                burnHaptics.extinguish()
-                onBurn(pressPoint, NewsFormat.burnRadius(after: Date.now.timeIntervalSince(burnStart)))
-            }
+        case .eggReady:
+            if let pressPoint { throwEgg(at: pressPoint) }
         case .recording:
             if let pressPoint, let note = recorder.stop() {
                 Haptics.success()
@@ -469,21 +530,57 @@ private struct PostRow: View {
                 Haptics.warning()
                 show("Hold a little longer to record")
             }
+        case .headlineReady:
+            showHeadlines = true
         case .choosing:
             Haptics.soft()
         case .idle:
             break
         }
-        burnStart = nil
         hovered = nil
         withAnimation(.snappy) { mode = .idle }
     }
 
-    /// Stops a burn or recording that's cut short (row scrolled away).
+    private func throwEgg(at spot: CGPoint) {
+        guard spend(EggPrice.steps) else {
+            Haptics.error()
+            show("An egg costs \(EggPrice.steps) steps. Go for a walk!")
+            return
+        }
+        let id = onThrowEgg(spot)
+        knownEggs?.insert(id)
+        landing[id] = EggLanding(start: .now, thrown: true)
+        eggHaptics.throwAndSplat(flight: EggLanding.flight)
+        finishLanding(id)
+    }
+
+    /// Eggs other people throw land live while you watch.
+    private func noticeNewEggs(_ ids: [String]) {
+        guard var known = knownEggs else {
+            knownEggs = Set(ids)
+            return
+        }
+        let fresh = ids.filter { !known.contains($0) }
+        guard !fresh.isEmpty else { return }
+        for id in fresh {
+            known.insert(id)
+            landing[id] = EggLanding(start: .now, thrown: false)
+            finishLanding(id)
+        }
+        knownEggs = known
+        eggHaptics.splat()
+    }
+
+    private func finishLanding(_ id: String) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(EggLanding.total))
+            landing[id] = nil
+        }
+    }
+
+    /// Stops a recording that's cut short (row scrolled away).
     private func cancelHold() {
-        if mode == .burning { burnHaptics.extinguish() }
         if mode == .recording { _ = recorder.stop() }
-        burnStart = nil
         hovered = nil
         mode = .idle
     }
@@ -495,32 +592,162 @@ private struct PostRow: View {
             if notice == message { notice = nil }
         }
     }
+}
 
-    // MARK: - Burns
+// MARK: - Headlines
 
-    private func activeBurn(at date: Date) -> BurnMark? {
-        guard mode == .burning, let pressPoint, let burnStart else { return nil }
-        return BurnMark(id: "active", x: pressPoint.x, y: pressPoint.y,
-                        r: NewsFormat.burnRadius(after: date.timeIntervalSince(burnStart)), uid: nil)
+/// Every headline written for a post, most steps first, and a box to write
+/// your own. Yours goes on top if you spend more than the current one.
+private struct HeadlineSheet: View {
+    let headlines: [Headline]
+    let availableSteps: Int
+    /// Returns whether it went through (enough steps).
+    let onPost: (String, Int) -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var amount = 0
+    @FocusState private var typing: Bool
+
+    /// The least it takes to go on top.
+    private var minimum: Int {
+        max(Headline.minimumSteps, (headlines.first?.steps ?? 0) + (headlines.isEmpty ? 0 : Headline.outbidBy))
     }
 
-    /// How much of the photo is burned away, 0 to 1.
-    private func burnedFraction(aspect: Double) -> Double {
-        guard !burns.isEmpty else { return 0 }
-        let n = 24
-        var hit = 0
-        for i in 0..<n {
-            for j in 0..<n {
-                let px = (Double(i) + 0.5) / Double(n)
-                let py = (Double(j) + 0.5) / Double(n)
-                if burns.contains(where: { burn in
-                    let dx = px - burn.x
-                    let dy = (py - burn.y) * aspect
-                    return dx * dx + dy * dy <= burn.r * burn.r * 1.1
-                }) { hit += 1 }
+    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var canAfford: Bool { availableSteps >= minimum }
+    private var canPost: Bool { trimmed.count >= 3 && canAfford && amount >= minimum && amount <= availableSteps }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField(headlines.isEmpty ? "Write the headline for this post" : "Write a better headline",
+                                  text: $text, axis: .vertical)
+                            .font(.system(size: 20, weight: .heavy))
+                            .lineLimit(1...3)
+                            .focused($typing)
+                            .onChange(of: text) { _, new in
+                                if new.count > Headline.maxLength { text = String(new.prefix(Headline.maxLength)) }
+                            }
+                        HStack {
+                            Text(headlines.isEmpty
+                                 ? "The headline with the most steps shows on the post."
+                                 : "Beat \(headlines[0].steps.formatted()) steps to go on top.")
+                            Spacer()
+                            Text("\(text.count)/\(Headline.maxLength)")
+                                .monospacedDigit()
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    .padding(14)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                    if canAfford {
+                        stepsPicker
+                    } else {
+                        Label("You need \(minimum.formatted()) steps. You have \(availableSteps.formatted()). Go for a walk!",
+                              systemImage: "figure.walk")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.brand)
+                    }
+
+                    Button {
+                        guard canPost else { return }
+                        if onPost(trimmed, amount) { dismiss() }
+                    } label: {
+                        Text(canAfford ? "Spend \(amount.formatted()) steps" : "Not enough steps")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 52)
+                            .background(canPost ? Color.brand : Color.brand.opacity(0.4), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canPost)
+
+                    Text("Spent steps come off your reward progress. Your walked total on the leaderboard stays the same.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if !headlines.isEmpty {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Headlines")
+                                .font(.headline)
+                                .padding(.bottom, 8)
+                            ForEach(Array(headlines.enumerated()), id: \.element.id) { index, line in
+                                HStack(alignment: .top, spacing: 12) {
+                                    Text("\(index + 1)")
+                                        .font(.subheadline.weight(.bold).monospacedDigit())
+                                        .foregroundStyle(index == 0 ? Color.brand : .secondary)
+                                        .frame(width: 18)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(line.text)
+                                            .font(.subheadline.weight(index == 0 ? .bold : .regular))
+                                        Text("\(line.firstName) · \(line.steps.formatted()) steps")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.vertical, 10)
+                                .hairline(leading: 30)
+                            }
+                        }
+                    }
+                }
+                .padding(16)
+            }
+            .navigationTitle(headlines.isEmpty ? "Write a headline" : "Headlines")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
             }
         }
-        return Double(hit) / Double(n * n)
+        .tint(.brand)
+        .onAppear {
+            amount = min(max(minimum, 0), max(availableSteps, minimum))
+            typing = true
+        }
+    }
+
+    /// How many steps to spend: − and + in hundreds, from the minimum up to
+    /// everything you have.
+    private var stepsPicker: some View {
+        HStack(spacing: 16) {
+            stepButton("minus", enabled: amount - 100 >= minimum) { amount -= 100 }
+            VStack(spacing: 0) {
+                Text(amount.formatted())
+                    .font(.system(size: 34, weight: .bold).monospacedDigit())
+                    .contentTransition(.numericText(value: Double(amount)))
+                    .animation(.snappy, value: amount)
+                Text("of \(availableSteps.formatted()) steps you have")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            stepButton("plus", enabled: amount + 100 <= availableSteps) { amount += 100 }
+        }
+    }
+
+    private func stepButton(_ icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            Haptics.select()
+            action()
+        } label: {
+            Image(systemName: icon)
+                .font(.headline)
+                .foregroundStyle(enabled ? Color.brand : .secondary)
+                .frame(width: 48, height: 48)
+                .background(Color(.secondarySystemBackground), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .buttonRepeatBehavior(.enabled)
     }
 }
 
