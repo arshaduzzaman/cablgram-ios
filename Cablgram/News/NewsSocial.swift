@@ -31,6 +31,8 @@ final class NewsSocial: ObservableObject {
     @Published private(set) var eggs: [String: [EggMark]] = [:]
     /// Headlines people paid steps for, most steps first.
     @Published private(set) var headlines: [String: [Headline]] = [:]
+    /// Set when saving something fails, so the feed can say so.
+    @Published var problem: String?
 
     private var listeners: [String: [ListenerRegistration]] = [:]
 
@@ -103,7 +105,8 @@ final class NewsSocial: ObservableObject {
             let eggs = doc.collection("eggs")
                 .order(by: "at", descending: true)
                 .limit(to: 150)
-                .addSnapshotListener { [weak self] snapshot, _ in
+                .addSnapshotListener { [weak self] snapshot, error in
+                    if let error { print("[Cablgram] eggs listener: \(error.localizedDescription)") }
                     guard let documents = snapshot?.documents else { return }
                     let eggs = documents.reversed().map { egg in
                         let data = egg.data()
@@ -149,14 +152,14 @@ final class NewsSocial: ObservableObject {
             return
         }
         let doc = post(postID)
-        doc.setData(["slaps": FieldValue.increment(Int64(1))], merge: true)
+        doc.setData(["slaps": FieldValue.increment(Int64(1))], merge: true, completion: report("slap"))
         doc.collection("marks").document(mark.id).setData([
             "uid": uid,
             "x": mark.x,
             "y": mark.y,
             "a": mark.angle,
             "at": FieldValue.serverTimestamp(),
-        ])
+        ], completion: report("slap"))
     }
 
     /// Pins a voice note at `point` (fractions of the photo).
@@ -176,7 +179,7 @@ final class NewsSocial: ObservableObject {
             "secs": (seconds * 10).rounded() / 10,
             "audio": audio,
             "at": FieldValue.serverTimestamp(),
-        ])
+        ], completion: report("voice note"))
     }
 
     func deleteVoice(_ noteID: String, on postID: String) {
@@ -184,7 +187,7 @@ final class NewsSocial: ObservableObject {
             voices[postID]?.removeAll { $0.id == noteID }
             return
         }
-        post(postID).collection("voices").document(noteID).delete()
+        post(postID).collection("voices").document(noteID).delete(completion: report("delete"))
     }
 
     /// Throws an egg at `point` (fractions of the photo). Returns its id so
@@ -202,7 +205,7 @@ final class NewsSocial: ObservableObject {
             "x": Self.round(egg.x),
             "y": Self.round(egg.y),
             "at": FieldValue.serverTimestamp(),
-        ])
+        ], completion: report("egg"))
         return egg.id
     }
 
@@ -220,7 +223,22 @@ final class NewsSocial: ObservableObject {
             "text": text,
             "steps": steps,
             "at": FieldValue.serverTimestamp(),
-        ])
+        ], completion: report("headline"))
+    }
+
+    /// Turns a failed save into a message on screen (and in the log).
+    private func report(_ what: String) -> (Error?) -> Void {
+        { [weak self] error in
+            guard let error else {
+                print("[Cablgram] saved \(what)")
+                return
+            }
+            print("[Cablgram] couldn't save \(what): \(error.localizedDescription)")
+            let message = (error as NSError).code == FirestoreErrorCode.permissionDenied.rawValue
+                ? "Couldn't save your \(what): Firestore rules are blocking it"
+                : "Couldn't save your \(what): \(error.localizedDescription)"
+            Task { @MainActor in self?.problem = message }
+        }
     }
 
     // MARK: - Decoding

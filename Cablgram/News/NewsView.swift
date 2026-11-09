@@ -76,6 +76,24 @@ struct NewsView: View {
             await feed.refresh()
         }
         .onChange(of: onScreen) { _, ids in social.watch(ids) }
+        .overlay(alignment: .top) {
+            if let problem = social.problem {
+                Label(problem, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.black.opacity(0.85), in: Capsule())
+                    .padding(.top, 8)
+                    .padding(.horizontal, 16)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .task(id: problem) {
+                        try? await Task.sleep(for: .seconds(5))
+                        withAnimation { social.problem = nil }
+                    }
+            }
+        }
+        .animation(.snappy, value: social.problem)
     }
 
     /// This week's steps in one slim line, linking to the Walk tab.
@@ -543,6 +561,7 @@ private struct PostRow: View {
     }
 
     private func throwEgg(at spot: CGPoint) {
+        print("[Cablgram] throwing egg, steps available: \(availableSteps), signed in: \(myID != nil)")
         guard spend(EggPrice.steps) else {
             Haptics.error()
             show("An egg costs \(EggPrice.steps) steps. Go for a walk!")
