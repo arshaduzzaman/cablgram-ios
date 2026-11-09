@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case news, walk, menu
+    case news, walk, discover, menu
 
     var id: String { rawValue }
 
@@ -9,6 +9,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .news: "News"
         case .walk: "Walk"
+        case .discover: "Discover"
         case .menu: "Menu"
         }
     }
@@ -17,6 +18,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .news: "house"
         case .walk: "figure.walk"
+        case .discover: "ticket"
         case .menu: "line.3.horizontal"
         }
     }
@@ -25,6 +27,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .news: "house.fill"
         case .walk: "figure.walk"
+        case .discover: "ticket.fill"
         case .menu: "line.3.horizontal"
         }
     }
@@ -61,6 +64,9 @@ struct MainView: View {
                 WalkPage()
                     .opacity(tab == .walk ? 1 : 0)
                     .allowsHitTesting(tab == .walk)
+                DiscoverView()
+                    .opacity(tab == .discover ? 1 : 0)
+                    .allowsHitTesting(tab == .discover)
                 MenuView()
                     .opacity(tab == .menu ? 1 : 0)
                     .allowsHitTesting(tab == .menu)

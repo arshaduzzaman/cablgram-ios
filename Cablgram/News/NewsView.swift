@@ -2,10 +2,9 @@ import SwiftUI
 import UIKit
 
 /// Cablgram's posts as a Threads-style feed: flat rows, hairlines between
-/// them, and the photo itself is the control. Double-tap to slap; hold to
-/// get 🥚 🎙 ✍️ and slide onto one: throw a rotten egg where you pressed,
-/// talk and pin a voice note there, or spend steps on a headline.
-/// Everything is shared live.
+/// them, and the photo itself is the control. Hold it to get 🥚 and ✍️,
+/// then slide onto one: throw a rotten egg where you pressed, or spend steps
+/// on a headline. Everything is shared live.
 struct NewsView: View {
     var openWalk: () -> Void = {}
 
@@ -13,8 +12,6 @@ struct NewsView: View {
     @EnvironmentObject private var auth: AuthStore
     @StateObject private var feed = NewsFeed()
     @StateObject private var social = NewsSocial()
-    @StateObject private var recorder = VoiceRecorder()
-    @StateObject private var player = VoicePlayer()
     /// Posts currently on screen; only these are listened to.
     @State private var onScreen: [String] = []
 
@@ -32,20 +29,10 @@ struct NewsView: View {
 
                 ForEach(feed.posts) { post in
                     PostRow(post: post,
-                            slapCount: social.slapCount(post.id),
-                            voices: social.voices(post.id),
                             eggs: social.eggs(post.id),
                             headlines: social.headlines(post.id),
                             myID: auth.user?.uid,
                             availableSteps: steps.availableSteps,
-                            recorder: recorder,
-                            player: player,
-                            onSlap: { spot in social.slap(post.id, at: spot) },
-                            onVoice: { spot, audio, seconds in
-                                social.postVoice(audio, seconds: seconds, at: spot,
-                                                 by: auth.displayName, on: post.id)
-                            },
-                            onDeleteVoice: { id in social.deleteVoice(id, on: post.id) },
                             spend: { amount in steps.spend(amount) },
                             onThrowEgg: { spot in social.throwEgg(at: spot, on: post.id) },
                             onHeadline: { text, amount in
@@ -140,33 +127,25 @@ struct NewsView: View {
 /// What a hold on the photo is doing.
 private enum HoldMode: Equatable {
     case idle
-    /// 🥚 🎙 ✍️ are showing; slide onto one.
+    /// 🥚 and ✍️ are showing; slide onto one.
     case choosing
     /// Finger is on 🥚: let go to throw.
     case eggReady
-    case recording
     /// Finger is on ✍️: let go to write a headline.
     case headlineReady
 }
 
-private enum HoldChoice { case egg, voice, headline }
+private enum HoldChoice { case egg, headline }
 
 /// One post: Cablgram's avatar on the left, then name, time, the headline
-/// people paid steps for, the photo (with everyone's eggs and voice notes
-/// on it), and a slim counts row.
+/// people paid steps for, the photo (with everyone's eggs on it), and a
+/// slim counts row.
 private struct PostRow: View {
     let post: NewsPost
-    let slapCount: Int
-    let voices: [VoiceNote]
     let eggs: [EggMark]
     let headlines: [Headline]
     let myID: String?
     let availableSteps: Int
-    @ObservedObject var recorder: VoiceRecorder
-    @ObservedObject var player: VoicePlayer
-    let onSlap: (CGPoint) -> Void
-    let onVoice: (CGPoint, Data, Double) -> Void
-    let onDeleteVoice: (String) -> Void
     /// Spends steps; returns whether there were enough.
     let spend: (Int) -> Bool
     let onThrowEgg: (CGPoint) -> String
@@ -174,7 +153,6 @@ private struct PostRow: View {
 
     @State private var image: UIImage?
     @State private var loadFailed = false
-    @State private var showBurst = false
 
     @State private var mode: HoldMode = .idle
     /// Where the hold started, as fractions of the photo.
@@ -274,12 +252,10 @@ private struct PostRow: View {
                     .resizable()
                     .scaledToFit()
                     .overlay { EggLayer(eggs: eggs, landing: landing) }
-                    .overlay { pins }
                     .overlay {
                         PhotoTouchLayer(onHoldBegan: holdBegan,
                                         onHoldMoved: holdMoved,
-                                        onHoldEnded: holdEnded,
-                                        onDoubleTap: doubleTap)
+                                        onHoldEnded: holdEnded)
                     }
                     .overlay { holdOverlay }
             } else {
@@ -301,17 +277,6 @@ private struct PostRow: View {
                 .stroke(Color(.separator).opacity(0.5), lineWidth: 1 / 3)
                 .allowsHitTesting(false)
         )
-        .overlay {
-            // Big hand that pops up on a double-tap, like Instagram's heart.
-            Image(systemName: "hand.raised.fill")
-                .font(.system(size: 84))
-                .foregroundStyle(.white)
-                .rotationEffect(.degrees(-20))
-                .shadow(color: .black.opacity(0.25), radius: 8)
-                .scaleEffect(showBurst ? 1 : 0.4)
-                .opacity(showBurst ? 1 : 0)
-                .allowsHitTesting(false)
-        }
         .task(id: post.imageUrl) {
             if image == nil { image = PhotoCache.shared.cached(post.imageUrl) }
             guard image == nil else { return }
@@ -320,28 +285,7 @@ private struct PostRow: View {
         }
     }
 
-    /// Voice notes pinned where they were recorded, and the recording pulse.
-    private var pins: some View {
-        GeometryReader { geo in
-            ForEach(voices) { note in
-                VoiceBubble(note: note,
-                            isPlaying: player.playingID == note.id,
-                            isMine: myID != nil && note.authorID == myID,
-                            onTap: { player.toggle(note) },
-                            onDelete: { onDeleteVoice(note.id) })
-                    .position(x: note.x * geo.size.width, y: note.y * geo.size.height)
-                    .transition(.scale.combined(with: .opacity))
-            }
-            if mode == .recording, let pressPoint {
-                RecordingPulse(level: recorder.level, elapsed: recorder.elapsed)
-                    .position(x: pressPoint.x * geo.size.width, y: pressPoint.y * geo.size.height)
-                    .allowsHitTesting(false)
-            }
-        }
-        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: voices.map(\.id))
-    }
-
-    /// 🥚 🎙 ✍️ above your finger while choosing, like Facebook reactions,
+    /// 🥚 and ✍️ above your finger while choosing, like Facebook reactions,
     /// and a target where the egg will land.
     @ViewBuilder
     private var holdOverlay: some View {
@@ -357,7 +301,6 @@ private struct PostRow: View {
                 }
                 HStack(spacing: 10) {
                     choiceBubble(.egg, emoji: "🥚", title: "Egg · \(EggPrice.steps)")
-                    choiceBubble(.voice, emoji: "🎙️", title: "Voice")
                     choiceBubble(.headline, emoji: "✍️", title: "Headline")
                 }
                 .padding(.horizontal, 12)
@@ -392,7 +335,7 @@ private struct PostRow: View {
     /// Where the menu sits: above the finger, kept inside the photo.
     private func menuCenter(in size: CGSize) -> CGPoint {
         guard let pressPoint else { return CGPoint(x: size.width / 2, y: size.height / 2) }
-        let x = min(max(pressPoint.x * size.width, 112), size.width - 112)
+        let x = min(max(pressPoint.x * size.width, 80), size.width - 80)
         var y = pressPoint.y * size.height - 86
         if y < 50 { y = pressPoint.y * size.height + 86 }
         return CGPoint(x: x, y: min(y, size.height - 50))
@@ -402,7 +345,7 @@ private struct PostRow: View {
     /// finger is on.
     private func spot(_ choice: HoldChoice, in size: CGSize) -> CGPoint {
         let center = menuCenter(in: size)
-        let offset: CGFloat = switch choice { case .egg: -68; case .voice: 0; case .headline: 68 }
+        let offset: CGFloat = switch choice { case .egg: -34; case .headline: 34 }
         return CGPoint(x: center.x + offset, y: center.y - 6)
     }
 
@@ -410,28 +353,6 @@ private struct PostRow: View {
 
     private var actions: some View {
         HStack(spacing: 16) {
-            SlapButton(count: slapCount) { slap(at: CGPoint(x: 0.5, y: 0.5), burst: false) }
-
-            if !voices.isEmpty {
-                let playingHere = voices.contains { $0.id == player.playingID }
-                Button {
-                    Haptics.select()
-                    if playingHere { player.stop() } else { player.playAll(voices) }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: playingHere ? "stop.fill" : "play.fill")
-                            .font(.system(size: 15))
-                            .foregroundStyle(Color.brand)
-                        Text(voices.count == 1 ? "1 voice" : "\(voices.count) voices")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-
             if !eggs.isEmpty {
                 HStack(spacing: 3) {
                     Text("🥚")
@@ -460,46 +381,28 @@ private struct PostRow: View {
     private var hint: String {
         if let notice { return notice }
         switch mode {
-        case .choosing: return "Slide to Egg, Voice or Headline"
+        case .choosing: return "Slide to Egg or Headline"
         case .eggReady: return "Let go to throw · \(EggPrice.steps) steps"
-        case .recording: return "Talking… let go to pin it"
         case .headlineReady: return "Let go to write a headline"
-        case .idle: return voices.isEmpty && eggs.isEmpty && headlines.isEmpty ? "Hold the photo" : ""
+        case .idle: return eggs.isEmpty && headlines.isEmpty ? "Hold the photo" : ""
         }
     }
 
     // MARK: - Gestures
 
-    private func doubleTap(at point: CGPoint, in size: CGSize) {
-        guard mode == .idle else { return }
-        slap(at: CGPoint(x: point.x / size.width, y: point.y / size.height), burst: true)
-    }
-
-    private func slap(at spot: CGPoint, burst: Bool) {
-        Haptics.slap()
-        onSlap(spot)
-        guard burst else { return }
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.55)) { showBurst = true }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(650))
-            withAnimation(.easeOut(duration: 0.2)) { showBurst = false }
-        }
-    }
-
     private func holdBegan(at point: CGPoint, in size: CGSize) {
         pressPoint = CGPoint(x: point.x / size.width, y: point.y / size.height)
         hovered = nil
-        player.stop()
         Haptics.press()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) { mode = .choosing }
     }
 
-    /// The finger picks a bubble. Voice starts recording straight away; Egg
-    /// and Headline wait for you to let go, and sliding off cancels them.
+    /// The finger picks a bubble; letting go uses it, and sliding off
+    /// cancels it.
     private func holdMoved(to point: CGPoint, in size: CGSize) {
         guard mode == .choosing || mode == .eggReady || mode == .headlineReady else { return }
         let reach: CGFloat = 36
-        let choice = [HoldChoice.egg, .voice, .headline].first { choice in
+        let choice = [HoldChoice.egg, .headline].first { choice in
             let c = spot(choice, in: size)
             return hypot(point.x - c.x, point.y - c.y) < reach
         }
@@ -512,43 +415,15 @@ private struct PostRow: View {
         case .headline:
             Haptics.select()
             withAnimation(.snappy) { mode = .headlineReady }
-        case .voice:
-            startRecording()
         case nil:
             withAnimation(.snappy) { mode = .choosing }
         }
-    }
-
-    private func startRecording() {
-        guard recorder.hasPermission else {
-            let denied = recorder.wasDenied
-            Task { _ = await recorder.requestPermission() }
-            show(denied ? "Allow the mic in Settings" : "Allow the mic, then try again")
-            Haptics.error()
-            withAnimation(.snappy) { mode = .idle }
-            return
-        }
-        guard recorder.start() else {
-            show("Couldn't start the mic")
-            withAnimation(.snappy) { mode = .idle }
-            return
-        }
-        Haptics.success()
-        withAnimation(.snappy) { mode = .recording }
     }
 
     private func holdEnded() {
         switch mode {
         case .eggReady:
             if let pressPoint { throwEgg(at: pressPoint) }
-        case .recording:
-            if let pressPoint, let note = recorder.stop() {
-                Haptics.success()
-                onVoice(pressPoint, note.audio, note.seconds)
-            } else {
-                Haptics.warning()
-                show("Hold a little longer to record")
-            }
         case .headlineReady:
             showHeadlines = true
         case .choosing:
@@ -561,7 +436,6 @@ private struct PostRow: View {
     }
 
     private func throwEgg(at spot: CGPoint) {
-        print("[Cablgram] throwing egg, steps available: \(availableSteps), signed in: \(myID != nil)")
         guard spend(EggPrice.steps) else {
             Haptics.error()
             show("An egg costs \(EggPrice.steps) steps. Go for a walk!")
@@ -598,9 +472,8 @@ private struct PostRow: View {
         }
     }
 
-    /// Stops a recording that's cut short (row scrolled away).
+    /// Resets a hold that's cut short (row scrolled away).
     private func cancelHold() {
-        if mode == .recording { _ = recorder.stop() }
         hovered = nil
         mode = .idle
     }
@@ -771,45 +644,13 @@ private struct HeadlineSheet: View {
     }
 }
 
-/// Hand icon and count. Every tap adds a slap.
-private struct SlapButton: View {
-    let count: Int
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: count > 0 ? "hand.raised.fill" : "hand.raised")
-                    .font(.system(size: 19))
-                    .rotationEffect(.degrees(-20))
-                    .foregroundStyle(count > 0 ? Color.brand : .primary)
-                    .symbolEffect(.bounce, value: count)
-                if count > 0 {
-                    Text(count.formatted())
-                        .font(.subheadline.weight(.medium).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .contentTransition(.numericText())
-                }
-            }
-            .padding(.vertical, 6)
-            .padding(.trailing, 4)
-            .contentShape(Rectangle())
-            .animation(.snappy, value: count)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(count == 1 ? "1 slap" : "\(count) slaps")
-        .accessibilityHint("Slap this post")
-    }
-}
-
 /// Transparent UIKit layer over a post photo. A hold only starts once the
 /// finger has stayed still, so the feed always scrolls normally; once it
-/// starts, scrolling pauses until the finger lifts. Double-tap slaps.
+/// starts, scrolling pauses until the finger lifts.
 private struct PhotoTouchLayer: UIViewRepresentable {
     var onHoldBegan: (CGPoint, CGSize) -> Void
     var onHoldMoved: (CGPoint, CGSize) -> Void
     var onHoldEnded: () -> Void
-    var onDoubleTap: (CGPoint, CGSize) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -824,11 +665,6 @@ private struct PhotoTouchLayer: UIViewRepresentable {
         hold.allowableMovement = 8
         hold.delegate = c
         view.addGestureRecognizer(hold)
-
-        let doubleTap = UITapGestureRecognizer(target: c, action: #selector(Coordinator.handleDoubleTap(_:)))
-        doubleTap.numberOfTapsRequired = 2
-        doubleTap.delegate = c
-        view.addGestureRecognizer(doubleTap)
         return view
     }
 
@@ -856,11 +692,6 @@ private struct PhotoTouchLayer: UIViewRepresentable {
             default:
                 break
             }
-        }
-
-        @objc func handleDoubleTap(_ g: UITapGestureRecognizer) {
-            guard let view else { return }
-            parent?.onDoubleTap(g.location(in: view), view.bounds.size)
         }
 
         /// Pauses the feed's scrolling while holding (and cancels a scroll

@@ -31,53 +31,9 @@ service cloud.firestore {
                     || request.resource.data.spentSteps >= resource.data.spentSteps)));
     }
 
-    // News feed: shared slaps, voice notes, eggs and headlines on each post.
+    // News feed: shared eggs and step-bought headlines on each post.
     match /newsPosts/{postId} {
       allow read: if request.auth != null;
-
-      // The slap counter only ever goes up by one.
-      allow create: if request.auth != null
-        && request.resource.data.keys().hasOnly(['slaps'])
-        && request.resource.data.slaps == 1;
-      allow update: if request.auth != null
-        && request.resource.data.keys().hasOnly(['slaps'])
-        && request.resource.data.slaps == resource.data.slaps + 1;
-
-      // A handprint where someone slapped the photo.
-      match /marks/{markId} {
-        allow read: if request.auth != null;
-        allow create: if request.auth != null
-          && request.resource.data.keys().hasOnly(['uid', 'x', 'y', 'a', 'at'])
-          && request.resource.data.uid == request.auth.uid
-          && request.resource.data.x is number
-          && request.resource.data.x >= 0 && request.resource.data.x <= 1
-          && request.resource.data.y is number
-          && request.resource.data.y >= 0 && request.resource.data.y <= 1
-          && request.resource.data.a is number
-          && request.resource.data.at == request.time;
-      }
-
-      // A voice note (up to 10 seconds of small AAC) pinned to a spot.
-      // Only the person who recorded it can delete it.
-      match /voices/{voiceId} {
-        allow read: if request.auth != null;
-        allow create: if request.auth != null
-          && request.resource.data.keys().hasOnly(['uid', 'author', 'x', 'y', 'secs', 'audio', 'at'])
-          && request.resource.data.uid == request.auth.uid
-          && request.resource.data.author is string
-          && request.resource.data.author.size() <= 80
-          && request.resource.data.x is number
-          && request.resource.data.x >= 0 && request.resource.data.x <= 1
-          && request.resource.data.y is number
-          && request.resource.data.y >= 0 && request.resource.data.y <= 1
-          && request.resource.data.secs is number
-          && request.resource.data.secs <= 11
-          && request.resource.data.audio is bytes
-          && request.resource.data.audio.size() <= 160000
-          && request.resource.data.at == request.time;
-        allow delete: if request.auth != null
-          && resource.data.uid == request.auth.uid;
-      }
 
       // A rotten egg someone threw at the photo (it costs them steps).
       match /eggs/{eggId} {
