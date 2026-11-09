@@ -22,7 +22,7 @@ service cloud.firestore {
         && request.resource.data.weekSteps <= 1000000;
     }
 
-    // News pile: shared slaps and drawings on each post.
+    // News feed: shared slaps, voice notes and burns on each post.
     match /newsPosts/{postId} {
       allow read: if request.auth != null;
 
@@ -48,20 +48,41 @@ service cloud.firestore {
           && request.resource.data.at == request.time;
       }
 
-      // A drawing left on the photo. Only its artist can delete it.
-      match /drawings/{drawingId} {
+      // A voice note (up to 10 seconds of small AAC) pinned to a spot.
+      // Only the person who recorded it can delete it.
+      match /voices/{voiceId} {
         allow read: if request.auth != null;
         allow create: if request.auth != null
-          && request.resource.data.keys().hasOnly(['uid', 'author', 'at', 'strokes'])
+          && request.resource.data.keys().hasOnly(['uid', 'author', 'x', 'y', 'secs', 'audio', 'at'])
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.author is string
           && request.resource.data.author.size() <= 80
-          && request.resource.data.strokes is list
-          && request.resource.data.strokes.size() > 0
-          && request.resource.data.strokes.size() <= 300
+          && request.resource.data.x is number
+          && request.resource.data.x >= 0 && request.resource.data.x <= 1
+          && request.resource.data.y is number
+          && request.resource.data.y >= 0 && request.resource.data.y <= 1
+          && request.resource.data.secs is number
+          && request.resource.data.secs <= 11
+          && request.resource.data.audio is bytes
+          && request.resource.data.audio.size() <= 160000
           && request.resource.data.at == request.time;
         allow delete: if request.auth != null
           && resource.data.uid == request.auth.uid;
+      }
+
+      // A hole someone burned through the photo. Burns are permanent.
+      match /burns/{burnId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null
+          && request.resource.data.keys().hasOnly(['uid', 'x', 'y', 'r', 'at'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.x is number
+          && request.resource.data.x >= 0 && request.resource.data.x <= 1
+          && request.resource.data.y is number
+          && request.resource.data.y >= 0 && request.resource.data.y <= 1
+          && request.resource.data.r is number
+          && request.resource.data.r >= 0.02 && request.resource.data.r <= 0.3
+          && request.resource.data.at == request.time;
       }
     }
   }

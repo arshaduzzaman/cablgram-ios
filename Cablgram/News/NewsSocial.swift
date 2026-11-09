@@ -12,20 +12,22 @@ struct SlapMark: Identifiable, Equatable {
     let angle: Double
 }
 
-/// Slaps and drawings on posts, shared through Firestore so everyone sees
+/// Slaps, voice notes and burns on posts, shared through Firestore so everyone sees
 /// everyone's marks live:
 ///
 ///     newsPosts/{postId}                 { slaps }
 ///     newsPosts/{postId}/marks/{id}      { uid, x, y, a, at }
-///     newsPosts/{postId}/drawings/{id}   { uid, author, at, strokes }
+///     newsPosts/{postId}/voices/{id}     { uid, author, x, y, secs, audio, at }
+///     newsPosts/{postId}/burns/{id}      { uid, x, y, r, at }
 ///
-/// Only the posts on top of the pile are listened to. Without a signed-in
+/// Only the posts on screen are listened to. Without a signed-in
 /// user (or Firebase), marks stay on this phone for the session.
 @MainActor
 final class NewsSocial: ObservableObject {
     @Published private(set) var slapCounts: [String: Int] = [:]
     @Published private(set) var marks: [String: [SlapMark]] = [:]
-    @Published private(set) var drawings: [String: [DoodleComment]] = [:]
+    @Published private(set) var voices: [String: [VoiceNote]] = [:]
+    @Published private(set) var burns: [String: [BurnMark]] = [:]
 
     private var listeners: [String: [ListenerRegistration]] = [:]
 
@@ -39,7 +41,8 @@ final class NewsSocial: ObservableObject {
 
     func slapCount(_ postID: String) -> Int { slapCounts[postID] ?? 0 }
     func marks(_ postID: String) -> [SlapMark] { marks[postID] ?? [] }
-    func drawings(_ postID: String) -> [DoodleComment] { drawings[postID] ?? [] }
+    func voices(_ postID: String) -> [VoiceNote] { voices[postID] ?? [] }
+    func burns(_ postID: String) -> [BurnMark] { burns[postID] ?? [] }
 
     // MARK: - Listening
 
@@ -74,16 +77,42 @@ final class NewsSocial: ObservableObject {
                     Task { @MainActor in self?.marks[id] = marks }
                 }
 
-            let drawings = doc.collection("drawings")
+            let voices = doc.collection("voices")
                 .order(by: "at", descending: true)
-                .limit(to: 30)
+                .limit(to: 20)
                 .addSnapshotListener { [weak self] snapshot, _ in
                     guard let documents = snapshot?.documents else { return }
-                    let drawings = documents.reversed().map(Self.drawing(from:))
-                    Task { @MainActor in self?.drawings[id] = drawings }
+                    let voices: [VoiceNote] = documents.reversed().compactMap { note in
+                        let data = note.data()
+                        guard let audio = data["audio"] as? Data else { return nil }
+                        return VoiceNote(id: note.documentID,
+                                         author: data["author"] as? String ?? "Someone",
+                                         authorID: data["uid"] as? String,
+                                         x: Self.number(data["x"]),
+                                         y: Self.number(data["y"]),
+                                         seconds: Self.number(data["secs"]),
+                                         audio: audio)
+                    }
+                    Task { @MainActor in self?.voices[id] = voices }
                 }
 
-            listeners[id] = [count, marks, drawings]
+            let burns = doc.collection("burns")
+                .order(by: "at", descending: true)
+                .limit(to: 300)
+                .addSnapshotListener { [weak self] snapshot, _ in
+                    guard let documents = snapshot?.documents else { return }
+                    let burns = documents.reversed().map { burn in
+                        let data = burn.data()
+                        return BurnMark(id: burn.documentID,
+                                        x: Self.number(data["x"]),
+                                        y: Self.number(data["y"]),
+                                        r: Self.number(data["r"]),
+                                        uid: data["uid"] as? String)
+                    }
+                    Task { @MainActor in self?.burns[id] = burns }
+                }
+
+            listeners[id] = [count, marks, voices, burns]
         }
     }
 
@@ -111,34 +140,50 @@ final class NewsSocial: ObservableObject {
         ])
     }
 
-    func postDrawing(_ strokes: [Stroke], by author: String, on postID: String) {
-        guard !strokes.isEmpty else { return }
-        let comment = DoodleComment(author: author, date: .now, strokes: strokes, authorID: uid)
+    /// Pins a voice note at `point` (fractions of the photo).
+    func postVoice(_ audio: Data, seconds: Double, at point: CGPoint, by author: String, on postID: String) {
+        let note = VoiceNote(id: UUID().uuidString, author: author, authorID: uid,
+                             x: min(max(point.x, 0.06), 0.94), y: min(max(point.y, 0.06), 0.94),
+                             seconds: seconds, audio: audio)
         guard let uid else {
-            drawings[postID, default: []].append(comment)
+            voices[postID, default: []].append(note)
             return
         }
-        post(postID).collection("drawings").document(comment.id.uuidString).setData([
+        post(postID).collection("voices").document(note.id).setData([
             "uid": uid,
             "author": author,
+            "x": note.x,
+            "y": note.y,
+            "secs": (seconds * 10).rounded() / 10,
+            "audio": audio,
             "at": FieldValue.serverTimestamp(),
-            "strokes": strokes.map { stroke in
-                [
-                    "c": stroke.color.rawValue,
-                    "w": Double(stroke.width),
-                    // Flat x,y list, rounded, to keep documents small.
-                    "p": stroke.points.flatMap { [Self.round($0.x), Self.round($0.y)] },
-                ] as [String: Any]
-            },
         ])
     }
 
-    func deleteDrawing(_ commentID: UUID, on postID: String) {
+    func deleteVoice(_ noteID: String, on postID: String) {
         guard uid != nil else {
-            drawings[postID]?.removeAll { $0.id == commentID }
+            voices[postID]?.removeAll { $0.id == noteID }
             return
         }
-        post(postID).collection("drawings").document(commentID.uuidString).delete()
+        post(postID).collection("voices").document(noteID).delete()
+    }
+
+    /// Burns a hole of radius `r` (fraction of the photo's width) at `point`.
+    func burn(_ postID: String, at point: CGPoint, radius r: Double) {
+        let mark = BurnMark(id: UUID().uuidString,
+                            x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1),
+                            r: min(max(r, 0.02), 0.3), uid: uid)
+        guard let uid else {
+            burns[postID, default: []].append(mark)
+            return
+        }
+        post(postID).collection("burns").document(mark.id).setData([
+            "uid": uid,
+            "x": Self.round(mark.x),
+            "y": Self.round(mark.y),
+            "r": Self.round(mark.r),
+            "at": FieldValue.serverTimestamp(),
+        ])
     }
 
     // MARK: - Decoding
@@ -149,22 +194,5 @@ final class NewsSocial: ObservableObject {
 
     private nonisolated static func round(_ value: CGFloat) -> Double {
         (Double(value) * 10_000).rounded() / 10_000
-    }
-
-    private nonisolated static func drawing(from document: QueryDocumentSnapshot) -> DoodleComment {
-        let data = document.data()
-        let strokes: [Stroke] = (data["strokes"] as? [[String: Any]] ?? []).compactMap { raw in
-            let flat = (raw["p"] as? [NSNumber] ?? []).map(\.doubleValue)
-            guard flat.count >= 2 else { return nil }
-            let points = stride(from: 0, to: flat.count - 1, by: 2).map { CGPoint(x: flat[$0], y: flat[$0 + 1]) }
-            return Stroke(points: points,
-                          color: InkColor(rawValue: raw["c"] as? String ?? "") ?? .pink,
-                          width: CGFloat(number(raw["w"])) > 0 ? CGFloat(number(raw["w"])) : BrushSize.medium.rawValue)
-        }
-        return DoodleComment(id: UUID(uuidString: document.documentID) ?? UUID(),
-                             author: data["author"] as? String ?? "Someone",
-                             date: (data["at"] as? Timestamp)?.dateValue() ?? .now,
-                             strokes: strokes,
-                             authorID: data["uid"] as? String)
     }
 }

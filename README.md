@@ -2,7 +2,7 @@
 
 SwiftUI app. Everyone signs in with Google first. The layout follows the Facebook app: a "cablgram" bar on top, icon tabs under it.
 
-- **News** (home icon): the Cablgram posts from `https://www.cablgram.com/api/facebook-posts` (the same feed the website shows) as a messy pile of polaroids on a table. Flick the top photo away to see the next, double-tap to leave a pink handprint where your finger lands, hold to draw on it, and shake the phone to throw them all back. Slaps and drawings are shared through Firestore (`newsPosts/{postId}`), so everyone sees everyone's marks. Publish `firestore.rules` in the Firebase console for this to work.
+- **News** (home icon): the Cablgram posts from `https://www.cablgram.com/api/facebook-posts` (the same feed the website shows) as a Threads-style feed. Double-tap a photo to slap it. Hold a photo and 🔥 Burn and 🎙 Voice pop up above your finger, like Facebook reactions: slide onto 🔥 to burn a hole where you pressed (the longer you hold, the bigger), or onto 🎙 to talk and pin a voice note there. Slaps, burns and voice notes are shared through Firestore (`newsPosts/{postId}`), so everyone sees them; publish `firestore.rules` in the Firebase console.
 - **Walk**: everything about walking on one scrolling page: the reward you picked and steps to go, a race to it against other walkers, a Start a walk button for a live walk on the map, a leaderboard preview with "See all", and rewards. Uncle Bobo's Chicken (10,000), Liberty Pizza Slice and Smashed Chicken Burger (15,000), GTA 6 (75,000) and PlayStation 5 (500,000). Edit the list in `Cablgram/Walk/Rewards.swift`.
 - **Menu**: your profile, stats, claimed rewards, a Haptics switch and sign out.
 
