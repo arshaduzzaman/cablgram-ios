@@ -1,15 +1,15 @@
 import SwiftUI
 import SafariServices
 
-/// Events happening in Bangladesh, from tickify.live: Tickify's featured
-/// picks up top, then everything on now or coming up, filterable by
-/// category. Tapping an event opens its Tickify page to get tickets.
+/// Events happening in Bangladesh from Tickify and Quicket: the sites'
+/// featured picks up top, then everything on now or coming up, filterable
+/// by category. Tapping an event opens its page on that site to get tickets.
 struct DiscoverView: View {
     @StateObject private var store = EventStore()
     @State private var category: String?
-    @State private var opened: TickifyEvent?
+    @State private var opened: ListedEvent?
 
-    private var shown: [TickifyEvent] {
+    private var shown: [ListedEvent] {
         guard let category else { return store.current }
         return store.current.filter { $0.categories?.contains(category) == true }
     }
@@ -145,14 +145,14 @@ struct DiscoverView: View {
     }
 
     private var credit: some View {
-        Text("Events and tickets from tickify.live")
+        Text("Events and tickets from tickify.live and quicket.me")
             .font(.caption)
             .foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 24)
     }
 
-    private func open(_ event: TickifyEvent) {
+    private func open(_ event: ListedEvent) {
         Haptics.tap()
         opened = event
     }
@@ -162,7 +162,7 @@ struct DiscoverView: View {
 
 /// One event: square poster, name, when, where, price.
 private struct EventRow: View {
-    let event: TickifyEvent
+    let event: ListedEvent
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -188,12 +188,15 @@ private struct EventRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                if let price = event.priceText {
-                    Text(price)
-                        .font(.footnote.weight(.bold))
-                        .foregroundStyle(event.canBuy ? Color.brand : .secondary)
-                        .padding(.top, 2)
+                HStack(spacing: 8) {
+                    if let price = event.priceText {
+                        Text(price)
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(event.canBuy ? Color.brand : .secondary)
+                    }
+                    SourceTag(name: event.sourceName)
                 }
+                .padding(.top, 2)
             }
             Spacer(minLength: 0)
         }
@@ -204,7 +207,7 @@ private struct EventRow: View {
 
 /// A featured event: its wide banner with the name and date under it.
 private struct FeaturedCard: View {
-    let event: TickifyEvent
+    let event: ListedEvent
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -233,11 +236,29 @@ private struct FeaturedCard: View {
                         .foregroundStyle(Color.brand)
                 }
             }
-            Text(event.whenText)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text(event.whenText)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                SourceTag(name: event.sourceName)
+            }
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// Which site an event is from, small and quiet.
+private struct SourceTag: View {
+    let name: String
+
+    var body: some View {
+        Text(name)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color(.secondarySystemBackground), in: Capsule())
     }
 }
 
