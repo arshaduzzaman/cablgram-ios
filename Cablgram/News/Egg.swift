@@ -65,18 +65,17 @@ enum EggArt {
             drip.addQuadCurve(to: CGPoint(x: x + width, y: top - width * 0.6),
                               control: CGPoint(x: x + neck, y: top))
             drip.closeSubpath()
-            context.drawLayer { layer in
-                layer.addFilter(.shadow(color: .black.opacity(0.2), radius: 1.5, y: 1))
-                layer.fill(drip, with: .color(white))
-            }
+            // Shadows are the same shape nudged down, not a blur: blurs
+            // get slow with lots of eggs on a post.
+            context.fill(drip.offsetBy(dx: 0, dy: 1.2), with: .color(.black.opacity(0.14)))
+            context.fill(drip, with: .color(white))
         }
 
         // Egg white: an uneven, glossy puddle.
         let whitePath = blob(center: center, radius: r * spread, rand: rand, salt: 10, wobble: 0.22)
-        context.drawLayer { layer in
-            layer.addFilter(.shadow(color: .black.opacity(0.25), radius: 2, y: 1))
-            layer.fill(whitePath, with: .color(white))
-        }
+        context.fill(whitePath.offsetBy(dx: 0, dy: 1.5), with: .color(.black.opacity(0.12)))
+        context.fill(whitePath.offsetBy(dx: 0, dy: 0.7), with: .color(.black.opacity(0.12)))
+        context.fill(whitePath, with: .color(white))
         context.stroke(whitePath, with: .color(.white), lineWidth: 1.2)
         // Shine on the egg white.
         let shine = CGRect(x: center.x - r * 0.62 * spread, y: center.y - r * 0.55 * spread,
@@ -239,7 +238,7 @@ struct EggScale: Equatable {
 /// animated. Other people's splats stay hidden until you've thrown one;
 /// then they pop in one after another. Yours are drawn on top, and get a
 /// pink outline when highlighted (a crowded post). Draws in the photo's coordinates.
-struct EggLayer: View {
+struct EggLayer: View, Equatable {
     let eggs: [EggMark]
     let landing: [String: EggLanding]
     /// Eggs you threw: always shown.

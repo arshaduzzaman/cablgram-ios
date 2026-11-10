@@ -201,17 +201,6 @@ private struct AimView: View {
             // How high the throw line arcs.
             let lift = distance * 0.3
 
-            // Landing spot: a flat ellipse, pink, with rings.
-            let spotWidth: CGFloat = 70
-            for (scale, opacity) in [(1.0, 0.22), (0.62, 0.32)] as [(CGFloat, Double)] {
-                let rect = CGRect(x: t.x - spotWidth * scale / 2, y: t.y - spotWidth * scale * 0.19,
-                                  width: spotWidth * scale, height: spotWidth * scale * 0.38)
-                context.fill(Path(ellipseIn: rect), with: .color(Color.brand.opacity(opacity)))
-                context.stroke(Path(ellipseIn: rect), with: .color(.white.opacity(0.95)), lineWidth: 2)
-            }
-            context.fill(Path(ellipseIn: CGRect(x: t.x - 4, y: t.y - 2, width: 8, height: 4)),
-                         with: .color(.white))
-
             // The throw line: one smooth curve from the egg to the spot.
             if distance > 20 {
             var line = Path()
@@ -223,6 +212,11 @@ private struct AimView: View {
                 Gradient(colors: [.white, .white.opacity(0.75)]), startPoint: a, endPoint: t),
                          style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
             }
+            // Where it lands: just a small dot.
+            var spot = context
+            spot.addFilter(.shadow(color: .black.opacity(0.35), radius: 2, y: 1))
+            spot.fill(Path(ellipseIn: CGRect(x: t.x - 6, y: t.y - 6, width: 12, height: 12)), with: .color(.white))
+            context.fill(Path(ellipseIn: CGRect(x: t.x - 3.5, y: t.y - 3.5, width: 7, height: 7)), with: .color(Color.brand))
 
             // Pull-back band from the egg to your finger, pinker as you pull.
             if power > 0.05 {
@@ -419,6 +413,8 @@ private struct PostRow: View {
                         EggLayer(eggs: revealed ? eggs : [], landing: landing, mine: myEggs, revealed: revealed,
                                  revealStart: revealStart, scale: eggScale, highlighted: crowded ? myEggs : [],
                                  animating: !landing.isEmpty || animateUntil > .now)
+                            // Only redraw the splats when something about them changed.
+                            .equatable()
                             .opacity(splatsHidden ? 0 : 1)
                     }
                     .overlay {
@@ -489,8 +485,8 @@ private struct PostRow: View {
     }
 
     /// While aiming: the egg sitting at the anchor, a band back to your
-    /// finger showing how hard you're pulling, a throw line arcing to the
-    /// spot where it'll land, drawn flat in perspective.
+    /// finger showing how hard you're pulling, and a throw line arcing to a
+    /// small dot where it'll land.
     @ViewBuilder
     private var holdOverlay: some View {
         if mode == .aiming, let hand = aimHand, let target = aimTarget {
