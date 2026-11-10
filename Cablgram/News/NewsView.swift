@@ -152,7 +152,7 @@ private struct AimView: View {
             let distance = hypot(t.x - a.x, t.y - a.y)
             let power = min(max(hypot(f.x - a.x, f.y - a.y) / 170, 0), 1)
             // How high the throw line arcs.
-            let lift = max(60, distance * 0.55)
+            let lift = distance * 0.3
 
             // Landing spot: a flat ellipse, pink, with rings.
             let spotWidth: CGFloat = 70
@@ -166,6 +166,7 @@ private struct AimView: View {
                          with: .color(.white))
 
             // The throw line: one smooth curve from the egg to the spot.
+            if distance > 20 {
             var line = Path()
             line.move(to: a)
             line.addQuadCurve(to: t, control: CGPoint(x: (a.x + t.x) / 2, y: (a.y + t.y) / 2 - lift * 2))
@@ -174,6 +175,7 @@ private struct AimView: View {
             lined.stroke(line, with: .linearGradient(
                 Gradient(colors: [.white, .white.opacity(0.75)]), startPoint: a, endPoint: t),
                          style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+            }
 
             // Pull-back band from the egg to your finger, pinker as you pull.
             if power > 0.05 {
@@ -200,7 +202,7 @@ private struct AimView: View {
             context.stroke(ring, with: .color(Color.brand), style: StrokeStyle(lineWidth: 4, lineCap: .round))
 
             // The egg, tipped towards where it's going, shaded to look round.
-            let heading = Angle(radians: atan2(t.y - a.y, t.x - a.x) + .pi / 2)
+            let heading = distance > 20 ? Angle(radians: atan2(t.y - a.y, t.x - a.x) + .pi / 2) : .zero
             context.fill(Path(ellipseIn: CGRect(x: a.x - 13, y: a.y + 12, width: 26, height: 8)),
                          with: .color(.black.opacity(0.3)))
             let egg = EggArt.egg(center: a, size: 36, angle: heading)
@@ -630,7 +632,7 @@ private struct PostRow: View {
     // MARK: - Gestures
 
     /// Hold: an egg appears where you pressed, which stays put as the
-    /// anchor, with the target straight ahead of it.
+    /// anchor. Let go without pulling and it lands right there.
     private func holdBegan(at point: CGPoint, in size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
         aimHand = CGPoint(x: point.x / size.width, y: point.y / size.height)
@@ -653,11 +655,11 @@ private struct PostRow: View {
         let anchor = CGPoint(x: hand.x * size.width, y: hand.y * size.height)
         let dx = point.x - anchor.x, dy = point.y - anchor.y
         let pulled = hypot(dx, dy)
-        // Until you drag a little, aim straight up.
-        // Pull back to shoot, like a cue: the egg goes the opposite way to
-        // your drag, and pulling further throws further.
-        let direction = pulled < 14 ? CGVector(dx: 0, dy: -1) : CGVector(dx: -dx / pulled, dy: -dy / pulled)
-        let reach = 110 + max(pulled - 14, 0) * 1.6
+        // Hold without pulling and it drops right where you pressed; pull
+        // back and it flies the other way, further the more you pull.
+        let deadZone: CGFloat = 12
+        let direction = pulled < deadZone ? CGVector(dx: 0, dy: 0) : CGVector(dx: -dx / pulled, dy: -dy / pulled)
+        let reach = max(pulled - deadZone, 0) * 2.4
         let x = anchor.x + direction.dx * reach
         let y = anchor.y + direction.dy * reach
         aimTarget = CGPoint(x: min(max(x / size.width, 0.04), 0.96),
