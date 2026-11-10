@@ -185,6 +185,17 @@ private struct EggIcon: Shape {
     }
 }
 
+/// Everything above the advertisers' banner strip: splats, their flight and
+/// your markers are cut off at its top edge, so nothing ever covers it.
+private struct AboveBanner: View {
+    var body: some View {
+        GeometryReader { geo in
+            Rectangle()
+                .frame(width: geo.size.width, height: geo.size.height * PostRow.bannerTop)
+        }
+    }
+}
+
 /// Where the hold started, where the egg will land and where your finger
 /// is, as fractions of the photo.
 private final class AimState: ObservableObject {
@@ -465,6 +476,7 @@ private struct PostRow: View, Equatable {
                             // Only redraw the splats when something about them changed.
                             .equatable()
                             .opacity(splatsHidden ? 0 : 1)
+                            .mask { AboveBanner() }
                     }
                     .overlay {
                         PhotoTouchLayer(onHoldBegan: holdBegan,
@@ -472,7 +484,10 @@ private struct PostRow: View, Equatable {
                                         onHoldEnded: holdEnded,
                                         onTaps: taps)
                     }
-                    .overlay { myMarkers.opacity(splatsHidden ? 0 : 1).allowsHitTesting(!splatsHidden) }
+                    .overlay {
+                        myMarkers.opacity(splatsHidden ? 0 : 1).allowsHitTesting(!splatsHidden)
+                            .mask { AboveBanner() }
+                    }
                     .overlay { loveBurstView }
                     .overlay { holdOverlay }
                     .animation(.easeInOut(duration: 0.25), value: splatsHidden)
@@ -734,7 +749,8 @@ private struct PostRow: View, Equatable {
     /// anchor. Let go without pulling and it lands right there.
     private func holdBegan(at point: CGPoint, in size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
-        aim.anchor = CGPoint(x: point.x / size.width, y: point.y / size.height)
+        // Pressing on the banner strip puts the egg just above it.
+        aim.anchor = CGPoint(x: point.x / size.width, y: min(point.y / size.height, Self.bannerTop - 0.03))
         aim(at: point, in: size)
         Haptics.press()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) { mode = .aiming }
