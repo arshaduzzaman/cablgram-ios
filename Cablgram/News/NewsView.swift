@@ -367,7 +367,7 @@ private struct PostRow: View {
                     .resizable()
                     .scaledToFit()
                     .overlay {
-                        EggLayer(eggs: eggs, landing: landing, mine: myEggs, revealed: revealed,
+                        EggLayer(eggs: revealed ? eggs : [], landing: landing, mine: myEggs, revealed: revealed,
                                  revealStart: revealStart, scale: eggScale, highlighted: crowded ? myEggs : [],
                                  animating: !landing.isEmpty || animateUntil > .now)
                             .opacity(splatsHidden ? 0 : 1)
@@ -606,7 +606,8 @@ private struct PostRow: View {
 
     /// Your most recent splat that has finished landing.
     private var latestMine: String? {
-        eggs.filter { myEggs.contains($0.id) && landing[$0.id] == nil }
+        guard revealed else { return nil }
+        return eggs.filter { myEggs.contains($0.id) && landing[$0.id] == nil }
             .last?.id
     }
 
@@ -622,8 +623,9 @@ private struct PostRow: View {
         return ids
     }
 
-    /// Everyone's splats show once you've thrown an egg at this post.
-    private var revealed: Bool { !myEggs.isEmpty }
+    /// Every splat on a post (yours from before too) stays hidden until you
+    /// throw an egg at it now.
+    private var revealed: Bool { !thrownHere.isEmpty }
 
     // MARK: - Gestures
 
