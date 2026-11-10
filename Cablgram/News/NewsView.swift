@@ -191,7 +191,7 @@ private struct AboveBanner: View {
     var body: some View {
         GeometryReader { geo in
             Rectangle()
-                .frame(width: geo.size.width, height: geo.size.height * PostRow.bannerTop)
+                .frame(width: geo.size.width, height: geo.size.height * PostRow.bannerTop(in: geo.size))
         }
     }
 }
@@ -325,9 +325,17 @@ private final class OnScreen {
 }
 
 private struct PostRow: View, Equatable {
-    /// Where the advertisers' banner strip starts, as a fraction of the
-    /// photo's height. Eggs can't land below it.
-    static let bannerTop: CGFloat = 0.94
+    /// The advertisers' banner strip is always the same height relative to
+    /// the photo's width (about 7%), whatever the photo's shape, plus a
+    /// small gap so nothing touches it.
+    static let bannerHeight: CGFloat = 0.078
+
+    /// Where the banner strip starts, as a fraction of the photo's height.
+    /// Eggs can't land or show below it.
+    static func bannerTop(in size: CGSize) -> CGFloat {
+        guard size.height > 0 else { return 1 }
+        return max(0.5, 1 - size.width * bannerHeight / size.height)
+    }
 
     /// Rows only redraw when what they show changes (the actions are the
     /// same each time, so they're left out).
@@ -750,7 +758,7 @@ private struct PostRow: View, Equatable {
     private func holdBegan(at point: CGPoint, in size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
         // Pressing on the banner strip puts the egg just above it.
-        aim.anchor = CGPoint(x: point.x / size.width, y: min(point.y / size.height, Self.bannerTop - 0.03))
+        aim.anchor = CGPoint(x: point.x / size.width, y: min(point.y / size.height, Self.bannerTop(in: size) - 0.03))
         aim(at: point, in: size)
         Haptics.press()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) { mode = .aiming }
@@ -780,7 +788,7 @@ private struct PostRow: View, Equatable {
         // Eggs never land on the bottom 6% of the photo, where the news
         // posts carry their advertisers' banner strip.
         aim.target = CGPoint(x: min(max(x / size.width, 0.04), 0.96),
-                            y: min(max(y / size.height, 0.04), Self.bannerTop))
+                            y: min(max(y / size.height, 0.04), Self.bannerTop(in: size)))
     }
 
     /// Let go to throw from your hand to the target.
