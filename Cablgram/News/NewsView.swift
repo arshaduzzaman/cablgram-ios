@@ -151,13 +151,8 @@ private struct AimView: View {
             let f = CGPoint(x: finger.x * size.width, y: finger.y * size.height)
             let distance = hypot(t.x - a.x, t.y - a.y)
             let power = min(max(hypot(f.x - a.x, f.y - a.y) / 170, 0), 1)
-            // The throw arcs up towards you: the higher it goes the bigger it
-            // looks, like it's coming out of the screen.
+            // How high the throw line arcs.
             let lift = max(60, distance * 0.55)
-            func point(_ u: CGFloat) -> CGPoint {
-                CGPoint(x: a.x + (t.x - a.x) * u, y: a.y + (t.y - a.y) * u - lift * 4 * u * (1 - u))
-            }
-            func height(_ u: CGFloat) -> CGFloat { 4 * u * (1 - u) }
 
             // Landing spot: a flat ellipse, pink, with rings.
             let spotWidth: CGFloat = 70
@@ -170,26 +165,15 @@ private struct AimView: View {
             context.fill(Path(ellipseIn: CGRect(x: t.x - 4, y: t.y - 2, width: 8, height: 4)),
                          with: .color(.white))
 
-            // Shadow of the flight along the ground.
-            var shadow = Path()
-            shadow.move(to: a)
-            shadow.addLine(to: t)
-            context.stroke(shadow, with: .color(.black.opacity(0.28)),
-                           style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [2, 7]))
-
-            // Flight path: a tapered ribbon of beads that swell as the egg
-            // rises towards you and shrink as it falls away.
-            let beads = 22
-            for k in 1..<beads {
-                let u = CGFloat(k) / CGFloat(beads)
-                let p = point(u)
-                let r = (2.2 + 3.6 * height(u)) * (1.15 - 0.35 * u)
-                let fade = 0.55 + 0.45 * (1 - u)
-                var bead = context
-                bead.addFilter(.shadow(color: .black.opacity(0.35), radius: 2, y: 1))
-                bead.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
-                          with: .color(.white.opacity(fade)))
-            }
+            // The throw line: one smooth curve from the egg to the spot.
+            var line = Path()
+            line.move(to: a)
+            line.addQuadCurve(to: t, control: CGPoint(x: (a.x + t.x) / 2, y: (a.y + t.y) / 2 - lift * 2))
+            var lined = context
+            lined.addFilter(.shadow(color: .black.opacity(0.35), radius: 3, y: 1))
+            lined.stroke(line, with: .linearGradient(
+                Gradient(colors: [.white, .white.opacity(0.75)]), startPoint: a, endPoint: t),
+                         style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
 
             // Pull-back band from the egg to your finger, pinker as you pull.
             if power > 0.05 {
@@ -456,9 +440,8 @@ private struct PostRow: View {
     }
 
     /// While aiming: the egg sitting at the anchor, a band back to your
-    /// finger showing how hard you're pulling, the egg's flight arcing up
-    /// out of the photo with its shadow on the "ground", and the spot where
-    /// it'll land drawn flat in perspective.
+    /// finger showing how hard you're pulling, a throw line arcing to the
+    /// spot where it'll land, drawn flat in perspective.
     @ViewBuilder
     private var holdOverlay: some View {
         if mode == .aiming, let hand = aimHand, let target = aimTarget {
