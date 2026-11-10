@@ -137,6 +137,98 @@ private enum HoldMode: Equatable {
     case aiming
 }
 
+/// The aiming picture, drawn in one Canvas.
+private struct AimView: View {
+    /// Fractions of the photo.
+    let anchor: CGPoint
+    let target: CGPoint
+    let finger: CGPoint
+
+    var body: some View {
+        Canvas { context, size in
+            let a = CGPoint(x: anchor.x * size.width, y: anchor.y * size.height)
+            let t = CGPoint(x: target.x * size.width, y: target.y * size.height)
+            let f = CGPoint(x: finger.x * size.width, y: finger.y * size.height)
+            let distance = hypot(t.x - a.x, t.y - a.y)
+            let power = min(max(hypot(f.x - a.x, f.y - a.y) / 170, 0), 1)
+            // The throw arcs up towards you: the higher it goes the bigger it
+            // looks, like it's coming out of the screen.
+            let lift = max(60, distance * 0.55)
+            func point(_ u: CGFloat) -> CGPoint {
+                CGPoint(x: a.x + (t.x - a.x) * u, y: a.y + (t.y - a.y) * u - lift * 4 * u * (1 - u))
+            }
+            func height(_ u: CGFloat) -> CGFloat { 4 * u * (1 - u) }
+
+            // Landing spot: a flat ellipse, pink, with rings.
+            let spotWidth: CGFloat = 70
+            for (scale, opacity) in [(1.0, 0.22), (0.62, 0.32)] as [(CGFloat, Double)] {
+                let rect = CGRect(x: t.x - spotWidth * scale / 2, y: t.y - spotWidth * scale * 0.19,
+                                  width: spotWidth * scale, height: spotWidth * scale * 0.38)
+                context.fill(Path(ellipseIn: rect), with: .color(Color.brand.opacity(opacity)))
+                context.stroke(Path(ellipseIn: rect), with: .color(.white.opacity(0.95)), lineWidth: 2)
+            }
+            context.fill(Path(ellipseIn: CGRect(x: t.x - 4, y: t.y - 2, width: 8, height: 4)),
+                         with: .color(.white))
+
+            // Shadow of the flight along the ground.
+            var shadow = Path()
+            shadow.move(to: a)
+            shadow.addLine(to: t)
+            context.stroke(shadow, with: .color(.black.opacity(0.28)),
+                           style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [2, 7]))
+
+            // Flight path: a tapered ribbon of beads that swell as the egg
+            // rises towards you and shrink as it falls away.
+            let beads = 22
+            for k in 1..<beads {
+                let u = CGFloat(k) / CGFloat(beads)
+                let p = point(u)
+                let r = (2.2 + 3.6 * height(u)) * (1.15 - 0.35 * u)
+                let fade = 0.55 + 0.45 * (1 - u)
+                var bead = context
+                bead.addFilter(.shadow(color: .black.opacity(0.35), radius: 2, y: 1))
+                bead.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
+                          with: .color(.white.opacity(fade)))
+            }
+
+            // Pull-back band from the egg to your finger, pinker as you pull.
+            if power > 0.05 {
+                var band = Path()
+                band.move(to: a)
+                band.addLine(to: f)
+                context.stroke(band, with: .color(.white.opacity(0.9)),
+                               style: StrokeStyle(lineWidth: 7 - 3 * power, lineCap: .round))
+                context.stroke(band, with: .color(Color.brand.opacity(0.4 + 0.6 * power)),
+                               style: StrokeStyle(lineWidth: 4 - 2 * power, lineCap: .round))
+                context.fill(Path(ellipseIn: CGRect(x: f.x - 7, y: f.y - 7, width: 14, height: 14)),
+                             with: .color(.white))
+                context.fill(Path(ellipseIn: CGRect(x: f.x - 4, y: f.y - 4, width: 8, height: 8)),
+                             with: .color(Color.brand))
+            }
+
+            // Power ring around the egg.
+            let ring = Path { path in
+                path.addArc(center: a, radius: 30, startAngle: .degrees(-90),
+                            endAngle: .degrees(-90 + 360 * Double(max(power, 0.02))), clockwise: false)
+            }
+            context.stroke(Path(ellipseIn: CGRect(x: a.x - 30, y: a.y - 30, width: 60, height: 60)),
+                           with: .color(.white.opacity(0.35)), lineWidth: 4)
+            context.stroke(ring, with: .color(Color.brand), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+
+            // The egg, tipped towards where it's going, shaded to look round.
+            let heading = Angle(radians: atan2(t.y - a.y, t.x - a.x) + .pi / 2)
+            context.fill(Path(ellipseIn: CGRect(x: a.x - 13, y: a.y + 12, width: 26, height: 8)),
+                         with: .color(.black.opacity(0.3)))
+            let egg = EggArt.egg(center: a, size: 36, angle: heading)
+            var shaded = context
+            shaded.addFilter(.shadow(color: .black.opacity(0.35), radius: 5, y: 3))
+            shaded.fill(egg, with: .radialGradient(
+                Gradient(colors: [.white, EggArt.shell, Color(red: 0.84, green: 0.78, blue: 0.66)]),
+                center: CGPoint(x: a.x - 6, y: a.y - 8), startRadius: 1, endRadius: 26))
+        }
+    }
+}
+
 /// How far the post is knocked about by a hit.
 private struct ShakeValues {
     var x: CGFloat = 0
@@ -181,6 +273,8 @@ private struct PostRow: View {
     /// land, as fractions of the photo.
     @State private var aimHand: CGPoint?
     @State private var aimTarget: CGPoint?
+    /// Where your finger is while pulling back, as fractions of the photo.
+    @State private var aimFinger: CGPoint?
     /// Goes up each time an egg lands, to shake the post.
     @State private var shakes = 0
     @State private var notice: String?
@@ -361,47 +455,16 @@ private struct PostRow: View {
         }
     }
 
-    /// While aiming: the egg in your hand, a dotted arc, and the target.
+    /// While aiming: the egg sitting at the anchor, a band back to your
+    /// finger showing how hard you're pulling, the egg's flight arcing up
+    /// out of the photo with its shadow on the "ground", and the spot where
+    /// it'll land drawn flat in perspective.
     @ViewBuilder
     private var holdOverlay: some View {
         if mode == .aiming, let hand = aimHand, let target = aimTarget {
-            GeometryReader { geo in
-                let h = CGPoint(x: hand.x * geo.size.width, y: hand.y * geo.size.height)
-                let t = CGPoint(x: target.x * geo.size.width, y: target.y * geo.size.height)
-                let lift = min(90, max(40, hypot(t.x - h.x, t.y - h.y) * 0.5))
-                let control = CGPoint(x: (h.x + t.x) / 2, y: min(h.y, t.y) - lift)
-                // Dotted flight path.
-                Path { path in
-                    path.move(to: h)
-                    path.addQuadCurve(to: t, control: control)
-                }
-                .stroke(.white, style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [0.1, 9]))
-                .shadow(color: .black.opacity(0.4), radius: 2)
-                // Target.
-                ZStack {
-                    Circle()
-                        .strokeBorder(Color.brand, style: StrokeStyle(lineWidth: 3, dash: [6, 5]))
-                        .frame(width: 58, height: 58)
-                    Circle().fill(Color.brand).frame(width: 9, height: 9)
-                }
-                .background(Circle().fill(.white.opacity(0.18)).frame(width: 58, height: 58))
-                .shadow(color: .black.opacity(0.3), radius: 3)
-                .position(t)
-                // Egg in your hand, just above your finger.
-                Canvas { context, size in
-                    let egg = EggArt.egg(center: CGPoint(x: size.width / 2, y: size.height / 2),
-                                         size: 34, angle: .degrees(-14))
-                    context.drawLayer { layer in
-                        layer.addFilter(.shadow(color: .black.opacity(0.4), radius: 4, y: 3))
-                        layer.fill(egg, with: .color(EggArt.shell))
-                    }
-                    context.stroke(egg, with: .color(Color(white: 0.7)), lineWidth: 1)
-                }
-                .frame(width: 50, height: 50)
-                .position(x: h.x, y: h.y - 34)
-            }
-            .allowsHitTesting(false)
-            .transition(.opacity)
+            AimView(anchor: hand, target: target, finger: aimFinger ?? hand)
+                .allowsHitTesting(false)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
         }
     }
 
@@ -601,6 +664,7 @@ private struct PostRow: View {
     private func aim(at point: CGPoint, in size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
         guard let hand = aimHand else { return }
+        aimFinger = CGPoint(x: point.x / size.width, y: point.y / size.height)
         let anchor = CGPoint(x: hand.x * size.width, y: hand.y * size.height)
         let dx = point.x - anchor.x, dy = point.y - anchor.y
         let pulled = hypot(dx, dy)
@@ -623,6 +687,7 @@ private struct PostRow: View {
         withAnimation(.snappy) { mode = .idle }
         aimHand = nil
         aimTarget = nil
+        aimFinger = nil
     }
 
     /// Throws an egg (free) at `spot`, flying from `from` (your finger) or
@@ -719,6 +784,7 @@ private struct PostRow: View {
     private func cancelHold() {
         aimHand = nil
         aimTarget = nil
+        aimFinger = nil
         mode = .idle
     }
 
@@ -915,7 +981,10 @@ private struct PhotoTouchLayer: UIViewRepresentable {
         // One recognizer, with taps counted here: a double-tap loves the
         // post the instant the second tap lands (no waiting to see if a
         // third comes), and a lone tap waits a moment to make sure.
+        // A tap only counts if the press wasn't a hold, so letting go of a
+        // throw never also hides the eggs.
         let tap = UITapGestureRecognizer(target: c, action: #selector(Coordinator.handleTap(_:)))
+        tap.require(toFail: hold)
         tap.delegate = c
         view.addGestureRecognizer(tap)
         return view
@@ -962,6 +1031,9 @@ private struct PhotoTouchLayer: UIViewRepresentable {
             let point = g.location(in: view)
             switch g.state {
             case .began:
+                pendingSingle?.cancel()
+                pendingSingle = nil
+                count = 0
                 setScrollLocked(true)
                 parent.onHoldBegan(point, view.bounds.size)
             case .changed:

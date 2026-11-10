@@ -319,7 +319,7 @@ struct EggLayer: View {
     /// goes away from you, with its shadow closing in on the target.
     private func flying(_ f: Double, from: CGPoint?, to target: CGPoint, size: CGSize, radius: CGFloat,
                         in context: inout GraphicsContext) {
-        let start = from.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height - 34) }
+        let start = from.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height) }
             ?? CGPoint(x: size.width * 0.5 + (target.x - size.width * 0.5) * 0.3, y: size.height + radius * 2)
         let control = CGPoint(x: (start.x + target.x) / 2, y: min(start.y, target.y) - size.height * 0.25)
         let t = CGFloat(f)
