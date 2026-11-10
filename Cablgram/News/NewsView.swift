@@ -133,15 +133,17 @@ struct NewsView: View {
 /// What a hold on the photo is doing.
 private enum HoldMode: Equatable {
     case idle
-    /// 🥚 and ✍️ are showing; slide onto one.
-    case choosing
-    /// Finger is on 🥚: let go to throw.
-    case eggReady
-    /// Finger is on ✍️: let go to write a headline.
-    case headlineReady
+    /// Egg in hand: drag to aim, let go to throw.
+    case aiming
 }
 
-private enum HoldChoice { case egg, headline }
+/// How far the post is knocked about by a hit.
+private struct ShakeValues {
+    var x: CGFloat = 0
+    var y: CGFloat = 0
+    var angle: Double = 0
+    var scale: CGFloat = 1
+}
 
 /// One double-tap heart: where it pops, tilted a little each time.
 private struct LoveBurst: Equatable {
@@ -175,8 +177,12 @@ private struct PostRow: View {
 
     @State private var mode: HoldMode = .idle
     /// Where the hold started, as fractions of the photo.
-    @State private var pressPoint: CGPoint?
-    @State private var hovered: HoldChoice?
+    /// While aiming: where your finger (and the egg) is, and where it will
+    /// land, as fractions of the photo.
+    @State private var aimHand: CGPoint?
+    @State private var aimTarget: CGPoint?
+    /// Goes up each time an egg lands, to shake the post.
+    @State private var shakes = 0
     @State private var notice: String?
     @State private var showHeadlines = false
 
@@ -189,7 +195,6 @@ private struct PostRow: View {
     /// When everyone else's splats start popping in after your first egg.
     @State private var revealStart: Date?
     /// Your splats outlined right now (after you tap one).
-    @State private var highlighted: Set<String> = []
     /// Splats hidden with a tap, to see the photo clearly.
     @State private var splatsHidden = false
     /// The heart that pops where you double-tapped.
@@ -285,7 +290,7 @@ private struct PostRow: View {
                     .scaledToFit()
                     .overlay {
                         EggLayer(eggs: eggs, landing: landing, mine: myEggs, revealed: revealed,
-                                 revealStart: revealStart, scale: eggScale, highlighted: highlighted,
+                                 revealStart: revealStart, scale: eggScale, highlighted: crowded ? myEggs : [],
                                  animating: !landing.isEmpty || animateUntil > .now)
                             .opacity(splatsHidden ? 0 : 1)
                     }
@@ -313,6 +318,36 @@ private struct PostRow: View {
         }
         .frame(maxWidth: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        // A hard hit knocks the post about for a moment.
+        .keyframeAnimator(initialValue: ShakeValues(), trigger: shakes) { content, v in
+            content
+                .rotationEffect(.degrees(v.angle))
+                .offset(x: v.x, y: v.y)
+                .scaleEffect(v.scale)
+        } keyframes: { _ in
+            KeyframeTrack(\.x) {
+                SpringKeyframe(-11, duration: 0.05)
+                SpringKeyframe(9, duration: 0.06)
+                SpringKeyframe(-6, duration: 0.06)
+                SpringKeyframe(3, duration: 0.07)
+                SpringKeyframe(0, duration: 0.12)
+            }
+            KeyframeTrack(\.y) {
+                SpringKeyframe(5, duration: 0.05)
+                SpringKeyframe(-3, duration: 0.07)
+                SpringKeyframe(0, duration: 0.14)
+            }
+            KeyframeTrack(\.angle) {
+                SpringKeyframe(-1.6, duration: 0.05)
+                SpringKeyframe(1.2, duration: 0.07)
+                SpringKeyframe(-0.5, duration: 0.07)
+                SpringKeyframe(0, duration: 0.12)
+            }
+            KeyframeTrack(\.scale) {
+                SpringKeyframe(0.975, duration: 0.05)
+                SpringKeyframe(1.0, duration: 0.25)
+            }
+        }
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Color(.separator).opacity(0.5), lineWidth: 1 / 3)
@@ -326,68 +361,48 @@ private struct PostRow: View {
         }
     }
 
-    /// 🥚 and ✍️ above your finger while choosing, like Facebook reactions,
-    /// and a target where the egg will land.
+    /// While aiming: the egg in your hand, a dotted arc, and the target.
     @ViewBuilder
     private var holdOverlay: some View {
-        if mode == .choosing || mode == .eggReady || mode == .headlineReady {
+        if mode == .aiming, let hand = aimHand, let target = aimTarget {
             GeometryReader { geo in
-                if let pressPoint, mode != .headlineReady {
+                let h = CGPoint(x: hand.x * geo.size.width, y: hand.y * geo.size.height)
+                let t = CGPoint(x: target.x * geo.size.width, y: target.y * geo.size.height)
+                let lift = min(90, max(40, hypot(t.x - h.x, t.y - h.y) * 0.5))
+                let control = CGPoint(x: (h.x + t.x) / 2, y: min(h.y, t.y) - lift)
+                // Dotted flight path.
+                Path { path in
+                    path.move(to: h)
+                    path.addQuadCurve(to: t, control: control)
+                }
+                .stroke(.white, style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [0.1, 9]))
+                .shadow(color: .black.opacity(0.4), radius: 2)
+                // Target.
+                ZStack {
                     Circle()
                         .strokeBorder(Color.brand, style: StrokeStyle(lineWidth: 3, dash: [6, 5]))
-                        .frame(width: 54, height: 54)
-                        .background(Circle().fill(.white.opacity(0.15)))
-                        .scaleEffect(mode == .eggReady ? 1.15 : 1)
-                        .position(x: pressPoint.x * geo.size.width, y: pressPoint.y * geo.size.height)
+                        .frame(width: 58, height: 58)
+                    Circle().fill(Color.brand).frame(width: 9, height: 9)
                 }
-                HStack(spacing: 10) {
-                    choiceBubble(.egg, emoji: "🥚", title: "Egg · \(EggPrice.steps)")
-                    choiceBubble(.headline, emoji: "✍️", title: "Headline")
+                .background(Circle().fill(.white.opacity(0.18)).frame(width: 58, height: 58))
+                .shadow(color: .black.opacity(0.3), radius: 3)
+                .position(t)
+                // Egg in your hand, just above your finger.
+                Canvas { context, size in
+                    let egg = EggArt.egg(center: CGPoint(x: size.width / 2, y: size.height / 2),
+                                         size: 34, angle: .degrees(-14))
+                    context.drawLayer { layer in
+                        layer.addFilter(.shadow(color: .black.opacity(0.4), radius: 4, y: 3))
+                        layer.fill(egg, with: .color(EggArt.shell))
+                    }
+                    context.stroke(egg, with: .color(Color(white: 0.7)), lineWidth: 1)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(.white, in: Capsule())
-                .shadow(color: .black.opacity(0.25), radius: 14, y: 6)
-                .position(menuCenter(in: geo.size))
-                .transition(.scale(scale: 0.5).combined(with: .opacity))
+                .frame(width: 50, height: 50)
+                .position(x: h.x, y: h.y - 34)
             }
             .allowsHitTesting(false)
+            .transition(.opacity)
         }
-    }
-
-    private func choiceBubble(_ choice: HoldChoice, emoji: String, title: String) -> some View {
-        let isHovered = hovered == choice
-        return VStack(spacing: 3) {
-            Text(emoji)
-                .font(.system(size: 30))
-                .frame(width: 50, height: 50)
-                .background(isHovered ? Color.brand.opacity(0.15) : Color(.secondarySystemBackground), in: Circle())
-            Text(title)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.black)
-                .lineLimit(1)
-                .fixedSize()
-        }
-        .frame(width: 58)
-        .scaleEffect(isHovered ? 1.3 : 1, anchor: .bottom)
-        .animation(.spring(response: 0.25, dampingFraction: 0.55), value: isHovered)
-    }
-
-    /// Where the menu sits: above the finger, kept inside the photo.
-    private func menuCenter(in size: CGSize) -> CGPoint {
-        guard let pressPoint else { return CGPoint(x: size.width / 2, y: size.height / 2) }
-        let x = min(max(pressPoint.x * size.width, 80), size.width - 80)
-        var y = pressPoint.y * size.height - 86
-        if y < 50 { y = pressPoint.y * size.height + 86 }
-        return CGPoint(x: x, y: min(y, size.height - 50))
-    }
-
-    /// Centre of each bubble in the menu, for working out which one the
-    /// finger is on.
-    private func spot(_ choice: HoldChoice, in size: CGSize) -> CGPoint {
-        let center = menuCenter(in: size)
-        let offset: CGFloat = switch choice { case .egg: -34; case .headline: 34 }
-        return CGPoint(x: center.x + offset, y: center.y - 6)
     }
 
     // MARK: - Counts row
@@ -433,6 +448,20 @@ private struct PostRow: View {
                 .accessibilityLabel(eggs.count == 1 ? "1 egg thrown" : "\(eggs.count) eggs thrown")
             }
 
+            Button {
+                Haptics.tap()
+                showHeadlines = true
+            } label: {
+                Image(systemName: "pencil.line")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 2)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Write a headline")
+
             Spacer(minLength: 0)
 
             Text(hint)
@@ -447,15 +476,13 @@ private struct PostRow: View {
     private var hint: String {
         if let notice { return notice }
         switch mode {
-        case .choosing: return "Slide to Egg or Headline"
-        case .eggReady: return "Let go to throw · \(EggPrice.steps) steps"
-        case .headlineReady: return "Let go to write a headline"
+        case .aiming: return "Aim, then let go to throw"
         case .idle:
             if splatsHidden { return "Eggs hidden · tap the photo to show" }
             if !revealed && !eggs.isEmpty {
                 return eggs.count == 1 ? "1 egg hidden · throw one to see it" : "\(eggs.count) eggs hidden · throw one to see them"
             }
-            return eggs.isEmpty && headlines.isEmpty ? "Double-tap to love · triple-tap to egg" : ""
+            return eggs.isEmpty && headlines.isEmpty ? "Hold to throw an egg · double-tap to love" : ""
         }
     }
 
@@ -509,46 +536,33 @@ private struct PostRow: View {
 
     // MARK: - Eggs
 
-    /// Your profile picture pinned beside each of your splats. Tapping your
-    /// splat (or the picture) outlines it in pink for a moment.
+    /// Your profile picture pinned beside each of your splats. When the post
+    /// is crowded with other people's, yours also get a pink outline.
     private var myMarkers: some View {
         GeometryReader { geo in
             let radius = EggArt.size * geo.size.width * eggScale.to
             ForEach(eggs.filter { myEggs.contains($0.id) && landing[$0.id] == nil }) { egg in
                 let center = CGPoint(x: egg.x * geo.size.width, y: egg.y * geo.size.height)
-                Button {
-                    highlight(egg.id)
-                } label: {
-                    ZStack(alignment: .topTrailing) {
-                        Circle()
-                            .fill(.clear)
-                            .frame(width: radius * 2, height: radius * 2)
-                            .contentShape(Circle())
-                        Avatar(url: myPhotoURL, name: myName, size: 24)
-                            .overlay(Circle().stroke(.white, lineWidth: 2))
-                            .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
-                            .offset(x: 10, y: -10)
-                            .scaleEffect(highlighted.contains(egg.id) ? 1.2 : 1)
-                    }
+                ZStack(alignment: .topTrailing) {
+                    Color.clear
+                        .frame(width: radius * 2, height: radius * 2)
+                    Avatar(url: myPhotoURL, name: myName, size: 24)
+                        .overlay(Circle().stroke(.white, lineWidth: 2))
+                        .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+                        .offset(x: 10, y: -10)
                 }
-                .buttonStyle(.plain)
+                .allowsHitTesting(false)
                 .position(center)
                 .transition(.scale.combined(with: .opacity))
                 .accessibilityLabel("Your egg")
             }
         }
-        .animation(.spring(response: 0.35, dampingFraction: 0.6), value: highlighted)
         .animation(.spring(response: 0.35, dampingFraction: 0.6), value: landing.keys.sorted())
     }
 
-    private func highlight(_ id: String) {
-        Haptics.select()
-        highlighted.insert(id)
-        keepAnimating(until: .now.addingTimeInterval(0.1))
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(2.5))
-            highlighted.remove(id)
-        }
+    /// Enough other people's splats that yours need an outline to stand out.
+    private var crowded: Bool {
+        revealed && eggs.count - myEggs.count >= 4
     }
 
     /// Eggs you threw: from this session, or saved under your account.
@@ -563,65 +577,55 @@ private struct PostRow: View {
 
     // MARK: - Gestures
 
+    /// Hold: an egg appears in your hand with a target a little ahead of
+    /// your finger (so you can see where it'll land).
     private func holdBegan(at point: CGPoint, in size: CGSize) {
-        pressPoint = CGPoint(x: point.x / size.width, y: point.y / size.height)
-        hovered = nil
+        aim(at: point, in: size)
         Haptics.press()
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) { mode = .choosing }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) { mode = .aiming }
     }
 
-    /// The finger picks a bubble; letting go uses it, and sliding off
-    /// cancels it.
+    /// Drag to aim.
     private func holdMoved(to point: CGPoint, in size: CGSize) {
-        guard mode == .choosing || mode == .eggReady || mode == .headlineReady else { return }
-        let reach: CGFloat = 36
-        let choice = [HoldChoice.egg, .headline].first { choice in
-            let c = spot(choice, in: size)
-            return hypot(point.x - c.x, point.y - c.y) < reach
-        }
-        guard choice != hovered else { return }
-        hovered = choice
-        switch choice {
-        case .egg:
-            Haptics.select()
-            withAnimation(.snappy) { mode = .eggReady }
-        case .headline:
-            Haptics.select()
-            withAnimation(.snappy) { mode = .headlineReady }
-        case nil:
-            withAnimation(.snappy) { mode = .choosing }
-        }
+        guard mode == .aiming else { return }
+        aim(at: point, in: size)
     }
 
+    private func aim(at point: CGPoint, in size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        let ahead: CGFloat = 110
+        aimHand = CGPoint(x: point.x / size.width, y: point.y / size.height)
+        aimTarget = CGPoint(x: min(max(point.x / size.width, 0.04), 0.96),
+                            y: min(max((point.y - ahead) / size.height, 0.04), 0.96))
+    }
+
+    /// Let go to throw from your hand to the target.
     private func holdEnded() {
-        switch mode {
-        case .eggReady:
-            if let pressPoint { throwEgg(at: pressPoint) }
-        case .headlineReady:
-            showHeadlines = true
-        case .choosing:
-            Haptics.soft()
-        case .idle:
-            break
+        if mode == .aiming, let target = aimTarget {
+            throwEgg(at: target, from: aimHand)
         }
-        hovered = nil
         withAnimation(.snappy) { mode = .idle }
+        aimHand = nil
+        aimTarget = nil
     }
 
-    private func throwEgg(at spot: CGPoint) {
-        guard spend(EggPrice.steps) else {
-            Haptics.error()
-            show("An egg costs \(EggPrice.steps) steps. Go for a walk!")
-            return
-        }
+    /// Throws an egg (free) at `spot`, flying from `from` (your finger) or
+    /// from below the photo. It hits hard: a big splat and the post shakes.
+    private func throwEgg(at spot: CGPoint, from: CGPoint? = nil) {
         let firstHere = !revealed
         splatsHidden = false
         let id = onThrowEgg(spot)
         thrownHere.insert(id)
         knownEggs?.insert(id)
-        landing[id] = EggLanding(start: .now, thrown: true)
-        eggHaptics.throwAndSplat(flight: EggLanding.flight)
+        let landingInfo = EggLanding(start: .now, thrown: true, from: from, strong: true)
+        landing[id] = landingInfo
+        eggHaptics.throwAndSplat(flight: landingInfo.impactTime())
         finishLanding(id)
+        // Shake the post the moment it hits.
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(landingInfo.impactTime()))
+            shakes += 1
+        }
         if firstHere {
             reveal()
         } else {
@@ -697,7 +701,8 @@ private struct PostRow: View {
 
     /// Resets a hold that's cut short (row scrolled away).
     private func cancelHold() {
-        hovered = nil
+        aimHand = nil
+        aimTarget = nil
         mode = .idle
     }
 
@@ -891,19 +896,12 @@ private struct PhotoTouchLayer: UIViewRepresentable {
         hold.delegate = c
         view.addGestureRecognizer(hold)
 
-        // Each tap count waits for the next one to fail, so a triple-tap
-        // isn't also read as a double and a single.
-        let triple = UITapGestureRecognizer(target: c, action: #selector(Coordinator.handleTap(_:)))
-        triple.numberOfTapsRequired = 3
-        let double = UITapGestureRecognizer(target: c, action: #selector(Coordinator.handleTap(_:)))
-        double.numberOfTapsRequired = 2
-        double.require(toFail: triple)
-        let single = UITapGestureRecognizer(target: c, action: #selector(Coordinator.handleTap(_:)))
-        single.require(toFail: double)
-        for tap in [triple, double, single] {
-            tap.delegate = c
-            view.addGestureRecognizer(tap)
-        }
+        // One recognizer, with taps counted here: a double-tap loves the
+        // post the instant the second tap lands (no waiting to see if a
+        // third comes), and a third throws an egg. Only a lone tap waits.
+        let tap = UITapGestureRecognizer(target: c, action: #selector(Coordinator.handleTap(_:)))
+        tap.delegate = c
+        view.addGestureRecognizer(tap)
         return view
     }
 
@@ -915,9 +913,34 @@ private struct PhotoTouchLayer: UIViewRepresentable {
         var parent: PhotoTouchLayer?
         weak var view: UIView?
 
+        private var count = 0
+        private var lastTap: Date = .distantPast
+        private var pendingSingle: DispatchWorkItem?
+        private static let gap: TimeInterval = 0.28
+
         @objc func handleTap(_ g: UITapGestureRecognizer) {
             guard let view else { return }
-            parent?.onTaps(g.numberOfTapsRequired, g.location(in: view), view.bounds.size)
+            let point = g.location(in: view)
+            let size = view.bounds.size
+            let now = Date.now
+            count = now.timeIntervalSince(lastTap) < Self.gap ? count + 1 : 1
+            lastTap = now
+            pendingSingle?.cancel()
+            pendingSingle = nil
+            switch count {
+            case 1:
+                let single = DispatchWorkItem { [weak self] in
+                    self?.parent?.onTaps(1, point, size)
+                }
+                pendingSingle = single
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.gap, execute: single)
+            case 2:
+                parent?.onTaps(2, point, size)
+            case 3:
+                parent?.onTaps(3, point, size)
+            default:
+                break
+            }
         }
 
         @objc func handleHold(_ g: UILongPressGestureRecognizer) {

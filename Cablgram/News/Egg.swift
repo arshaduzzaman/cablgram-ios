@@ -9,11 +9,6 @@ struct EggMark: Identifiable, Equatable {
     let uid: String?
 }
 
-/// What a throw costs.
-enum EggPrice {
-    static let steps = 50
-}
-
 // MARK: - Drawing
 
 /// How far along a splat is. `final` is how it stays on the photo.
@@ -26,6 +21,8 @@ struct SplatProgress {
     var drips: Double
     /// Shell pieces flying off (0 = at the hit, 1 = landed). Some fade out.
     var shells: Double
+    /// How far droplets and shell fly (bigger for hard hits).
+    var burst: Double = 1
 
     static let final = SplatProgress(spread: 1, droplets: 1, drips: 1, shells: 1)
 }
@@ -100,7 +97,7 @@ enum EggArt {
         // Droplets thrown out around the hit.
         for i in 0..<9 {
             let angle = rand.next(i, 40) * 2 * .pi
-            let distance = r * (1.15 + rand.next(i, 41) * 0.9) * CGFloat(easeOut(p.droplets))
+            let distance = r * (1.15 + rand.next(i, 41) * 0.9) * CGFloat(easeOut(p.droplets) * p.burst)
             let size = r * (0.07 + rand.next(i, 42) * 0.1)
             let point = CGPoint(x: center.x + cos(angle) * distance, y: center.y + sin(angle) * distance)
             let color = i % 4 == 0 ? yolk : white
@@ -114,7 +111,7 @@ enum EggArt {
             let angle = rand.next(i, 50) * 2 * .pi
             let reach = stays ? 0.7 + rand.next(i, 51) * 0.5 : 1.6 + rand.next(i, 51) * 1.4
             let t = CGFloat(easeOut(p.shells))
-            let distance = r * CGFloat(reach) * t
+            let distance = r * CGFloat(reach * p.burst) * t
             let fade = stays ? 1 : max(1 - p.shells * 1.2, 0)
             guard fade > 0 else { continue }
             let point = CGPoint(x: center.x + cos(angle) * distance,
@@ -194,11 +191,19 @@ enum EggArt {
 struct EggLanding: Equatable {
     let start: Date
     let thrown: Bool
+    /// Where the throw starts (your finger), as fractions of the photo; nil
+    /// throws from below the photo.
+    var from: CGPoint? = nil
+    /// A hard hit: a punchier splat with droplets and shell flying further.
+    var strong: Bool = false
 
     static let flight: TimeInterval = 0.42
     static let total: TimeInterval = 2.8
 
-    func impactTime() -> TimeInterval { thrown ? Self.flight : 0 }
+    func impactTime() -> TimeInterval {
+        guard thrown else { return 0 }
+        return from == nil ? Self.flight : 0.3
+    }
 }
 
 /// How big splats are drawn, animating smoothly between sizes: the more
@@ -233,7 +238,7 @@ struct EggScale: Equatable {
 /// Splats on the photo, with any eggs that are mid-flight or landing
 /// animated. Other people's splats stay hidden until you've thrown one;
 /// then they pop in one after another. Yours are drawn on top, and get a
-/// pink outline while highlighted. Draws in the photo's coordinates.
+/// pink outline when highlighted (a crowded post). Draws in the photo's coordinates.
 struct EggLayer: View {
     let eggs: [EggMark]
     let landing: [String: EggLanding]
@@ -290,10 +295,10 @@ struct EggLayer: View {
             let t = now.timeIntervalSince(anim.start)
             let impact = anim.impactTime()
             if t < impact {
-                flying(t / impact, to: center, size: size, radius: radius, in: &context)
+                flying(t / impact, from: anim.from, to: center, size: size, radius: radius, in: &context)
             } else {
                 EggArt.draw(egg.id, at: center, radius: radius,
-                            progress: Self.progress(after: t - impact), in: &context)
+                            progress: Self.progress(after: t - impact, strong: anim.strong), in: &context)
             }
             return
         }
@@ -312,9 +317,10 @@ struct EggLayer: View {
 
     /// The egg flying in from below the photo, spinning and shrinking as it
     /// goes away from you, with its shadow closing in on the target.
-    private func flying(_ f: Double, to target: CGPoint, size: CGSize, radius: CGFloat,
+    private func flying(_ f: Double, from: CGPoint?, to target: CGPoint, size: CGSize, radius: CGFloat,
                         in context: inout GraphicsContext) {
-        let start = CGPoint(x: size.width * 0.5 + (target.x - size.width * 0.5) * 0.3, y: size.height + radius * 2)
+        let start = from.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height - 34) }
+            ?? CGPoint(x: size.width * 0.5 + (target.x - size.width * 0.5) * 0.3, y: size.height + radius * 2)
         let control = CGPoint(x: (start.x + target.x) / 2, y: min(start.y, target.y) - size.height * 0.25)
         let t = CGFloat(f)
         let point = CGPoint(x: (1 - t) * (1 - t) * start.x + 2 * (1 - t) * t * control.x + t * t * target.x,
@@ -334,12 +340,15 @@ struct EggLayer: View {
 
     /// The splat over time after impact: a wobbly spring out, droplets and
     /// shell flying, then slow drips.
-    static func progress(after t: TimeInterval) -> SplatProgress {
+    static func progress(after t: TimeInterval, strong: Bool = false) -> SplatProgress {
         let spring = 1 - exp(-11 * t) * cos(17 * t)
-        return SplatProgress(spread: 0.25 + 0.75 * spring,
-                             droplets: min(t / 0.22, 1),
+        // A hard hit squashes out wide first, then settles back.
+        let punch = strong ? 0.35 * exp(-7 * t) : 0
+        return SplatProgress(spread: 0.25 + 0.75 * spring + punch,
+                             droplets: min(t / (strong ? 0.18 : 0.22), 1),
                              drips: EggArt.easeOut(max(t - 0.15, 0) / 2.2),
-                             shells: min(t / 0.55, 1))
+                             shells: min(t / 0.55, 1),
+                             burst: strong ? 1.45 : 1)
     }
 }
 

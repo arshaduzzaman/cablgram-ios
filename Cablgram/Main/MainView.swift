@@ -50,6 +50,9 @@ struct MainView: View {
     @EnvironmentObject private var steps: StepStore
     @EnvironmentObject private var leaderboard: LeaderboardStore
     @State private var tab: AppTab = .news
+    /// The page mostly on screen while you swipe, so the dock follows your
+    /// finger instead of waiting for the swipe to settle.
+    @State private var showing: AppTab = .news
     @StateObject private var dock = DockState()
 
     var body: some View {
@@ -60,12 +63,16 @@ struct MainView: View {
                 NewsView(openWalk: {
                     withAnimation(.snappy) { tab = .walk }
                 })
+                .tracksPage(.news, showing: $showing)
                 .tag(AppTab.news)
                 WalkPage()
+                    .tracksPage(.walk, showing: $showing)
                     .tag(AppTab.walk)
                 DiscoverView()
+                    .tracksPage(.discover, showing: $showing)
                     .tag(AppTab.discover)
                 MenuView()
+                    .tracksPage(.menu, showing: $showing)
                     .tag(AppTab.menu)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -73,7 +80,7 @@ struct MainView: View {
             .contentMargins(.bottom, 92, for: .scrollContent)
             .ignoresSafeArea(edges: .bottom)
 
-            Dock(selection: $tab)
+            Dock(selection: $tab, showing: showing)
         }
         .environmentObject(dock)
         .background(Color(.systemBackground))
@@ -90,7 +97,10 @@ struct MainView: View {
             .padding(.bottom, 10)
             .background(Color.brand.ignoresSafeArea(edges: .top))
         }
-        .onChange(of: tab) { _, _ in
+        .onChange(of: tab) { _, new in
+            if showing != new { showing = new }
+        }
+        .onChange(of: showing) { _, _ in
             Haptics.select()
             dock.setCompact(false)
         }
@@ -125,6 +135,8 @@ struct MainView: View {
 /// (the selected one filled, in pink), and your profile photo last.
 private struct Dock: View {
     @Binding var selection: AppTab
+    /// The page on screen right now (follows a swipe as it happens).
+    var showing: AppTab
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var dock: DockState
     @Namespace private var pill
@@ -132,9 +144,9 @@ private struct Dock: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(AppTab.allCases) { tab in
-                let isSelected = tab == selection
+                let isSelected = tab == showing
                 Button {
-                    guard selection != tab else { return }
+                    guard selection != tab || showing != tab else { return }
                     withAnimation(.snappy(duration: 0.3)) { selection = tab }
                 } label: {
                     ZStack {
@@ -160,7 +172,7 @@ private struct Dock: View {
         .padding(.horizontal, dock.compact ? 64 : 22)
         // Sits low, close to the bottom edge.
         .offset(y: 16)
-        .animation(.snappy(duration: 0.3), value: selection)
+        .animation(.snappy(duration: 0.3), value: showing)
     }
 
     @ViewBuilder
@@ -222,5 +234,17 @@ struct Avatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+    }
+}
+
+private extension View {
+    /// Marks `page` as showing once more than half of it is on screen.
+    func tracksPage(_ page: AppTab, showing: Binding<AppTab>) -> some View {
+        onGeometryChange(for: Bool.self) { proxy in
+            let frame = proxy.frame(in: .global)
+            return abs(frame.minX) < frame.width / 2
+        } action: { onScreen in
+            if onScreen, showing.wrappedValue != page { showing.wrappedValue = page }
+        }
     }
 }
