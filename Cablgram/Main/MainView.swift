@@ -85,7 +85,7 @@ struct MainView: View {
         .background(Color(.systemBackground))
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
-                Text("cablgram")
+                Text("cablgram.")
                     .font(.wordmark(28))
                     .tracking(-0.8)
                     .foregroundStyle(.white)
