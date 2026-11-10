@@ -490,14 +490,11 @@ private struct PostRow: View {
 
     private var loved: Bool { lovers.contains(myLoveKey) }
 
-    /// One tap hides or shows the eggs, two love the post, three throw an
-    /// egg right where you tapped.
+    /// One tap hides or shows the eggs, two love the post.
     private func taps(_ count: Int, at point: CGPoint, in size: CGSize) {
         guard mode == .idle, size.width > 0, size.height > 0 else { return }
         let spot = CGPoint(x: point.x / size.width, y: point.y / size.height)
         switch count {
-        case 3:
-            throwEgg(at: spot)
         case 2:
             Haptics.success()
             if !loved { onLove(true) }
@@ -541,7 +538,8 @@ private struct PostRow: View {
     private var myMarkers: some View {
         GeometryReader { geo in
             let radius = EggArt.size * geo.size.width * eggScale.to
-            ForEach(eggs.filter { myEggs.contains($0.id) && landing[$0.id] == nil }) { egg in
+            // Just one picture: by your latest splat.
+            ForEach(eggs.filter { $0.id == latestMine }) { egg in
                 let center = CGPoint(x: egg.x * geo.size.width, y: egg.y * geo.size.height)
                 ZStack(alignment: .topTrailing) {
                     Color.clear
@@ -558,6 +556,12 @@ private struct PostRow: View {
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.6), value: landing.keys.sorted())
+    }
+
+    /// Your most recent splat that has finished landing.
+    private var latestMine: String? {
+        eggs.filter { myEggs.contains($0.id) && landing[$0.id] == nil }
+            .last?.id
     }
 
     /// Enough other people's splats that yours need an outline to stand out.
@@ -577,15 +581,18 @@ private struct PostRow: View {
 
     // MARK: - Gestures
 
-    /// Hold: an egg appears in your hand with a target a little ahead of
-    /// your finger (so you can see where it'll land).
+    /// Hold: an egg appears where you pressed, which stays put as the
+    /// anchor, with the target straight ahead of it.
     private func holdBegan(at point: CGPoint, in size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        aimHand = CGPoint(x: point.x / size.width, y: point.y / size.height)
         aim(at: point, in: size)
         Haptics.press()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) { mode = .aiming }
     }
 
-    /// Drag to aim.
+    /// Drag to aim: the direction from the anchor to your finger sets the
+    /// angle, and dragging further throws further.
     private func holdMoved(to point: CGPoint, in size: CGSize) {
         guard mode == .aiming else { return }
         aim(at: point, in: size)
@@ -593,10 +600,17 @@ private struct PostRow: View {
 
     private func aim(at point: CGPoint, in size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
-        let ahead: CGFloat = 110
-        aimHand = CGPoint(x: point.x / size.width, y: point.y / size.height)
-        aimTarget = CGPoint(x: min(max(point.x / size.width, 0.04), 0.96),
-                            y: min(max((point.y - ahead) / size.height, 0.04), 0.96))
+        guard let hand = aimHand else { return }
+        let anchor = CGPoint(x: hand.x * size.width, y: hand.y * size.height)
+        let dx = point.x - anchor.x, dy = point.y - anchor.y
+        let pulled = hypot(dx, dy)
+        // Until you drag a little, aim straight up.
+        let direction = pulled < 14 ? CGVector(dx: 0, dy: -1) : CGVector(dx: dx / pulled, dy: dy / pulled)
+        let reach = 110 + max(pulled - 14, 0) * 1.6
+        let x = anchor.x + direction.dx * reach
+        let y = anchor.y + direction.dy * reach
+        aimTarget = CGPoint(x: min(max(x / size.width, 0.04), 0.96),
+                            y: min(max(y / size.height, 0.04), 0.96))
     }
 
     /// Let go to throw from your hand to the target.
@@ -879,7 +893,7 @@ private struct PhotoTouchLayer: UIViewRepresentable {
     var onHoldBegan: (CGPoint, CGSize) -> Void
     var onHoldMoved: (CGPoint, CGSize) -> Void
     var onHoldEnded: () -> Void
-    /// Taps on the photo: 1 hides or shows eggs, 2 loves, 3 throws an egg.
+    /// Taps on the photo: 1 hides or shows eggs, 2 loves.
     var onTaps: (Int, CGPoint, CGSize) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -898,7 +912,7 @@ private struct PhotoTouchLayer: UIViewRepresentable {
 
         // One recognizer, with taps counted here: a double-tap loves the
         // post the instant the second tap lands (no waiting to see if a
-        // third comes), and a third throws an egg. Only a lone tap waits.
+        // third comes), and a lone tap waits a moment to make sure.
         let tap = UITapGestureRecognizer(target: c, action: #selector(Coordinator.handleTap(_:)))
         tap.delegate = c
         view.addGestureRecognizer(tap)
@@ -936,8 +950,6 @@ private struct PhotoTouchLayer: UIViewRepresentable {
                 DispatchQueue.main.asyncAfter(deadline: .now() + Self.gap, execute: single)
             case 2:
                 parent?.onTaps(2, point, size)
-            case 3:
-                parent?.onTaps(3, point, size)
             default:
                 break
             }
