@@ -99,6 +99,7 @@ struct MenuView: View {
             }
             .padding(16)
         }
+        .collapsesDock()
         .background(Color(.systemBackground))
     }
 

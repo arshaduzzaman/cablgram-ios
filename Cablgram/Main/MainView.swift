@@ -50,6 +50,7 @@ struct MainView: View {
     @EnvironmentObject private var steps: StepStore
     @EnvironmentObject private var leaderboard: LeaderboardStore
     @State private var tab: AppTab = .news
+    @StateObject private var dock = DockState()
 
     var body: some View {
         // The pages run all the way to the bottom of the screen and the dock
@@ -74,6 +75,7 @@ struct MainView: View {
 
             Dock(selection: $tab)
         }
+        .environmentObject(dock)
         .background(Color(.systemBackground))
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
@@ -88,7 +90,10 @@ struct MainView: View {
             .padding(.bottom, 10)
             .background(Color.brand.ignoresSafeArea(edges: .top))
         }
-        .onChange(of: tab) { _, _ in Haptics.select() }
+        .onChange(of: tab) { _, _ in
+            Haptics.select()
+            dock.setCompact(false)
+        }
         .task { await steps.start() }
         .task(id: auth.user?.uid) {
             if auth.user != nil {
@@ -121,6 +126,7 @@ struct MainView: View {
 private struct Dock: View {
     @Binding var selection: AppTab
     @EnvironmentObject private var auth: AuthStore
+    @EnvironmentObject private var dock: DockState
     @Namespace private var pill
 
     var body: some View {
@@ -140,7 +146,7 @@ private struct Dock: View {
                         icon(for: tab, selected: isSelected)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 52)
+                    .frame(height: dock.compact ? 42 : 52)
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -148,10 +154,12 @@ private struct Dock: View {
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
-        .padding(6)
+        .padding(dock.compact ? 4 : 6)
         .modifier(GlassDock())
-        .padding(.horizontal, 22)
-        .padding(.bottom, 2)
+        // Smaller and narrower while scrolling, like Instagram's.
+        .padding(.horizontal, dock.compact ? 64 : 22)
+        // Sits low, close to the bottom edge.
+        .offset(y: 16)
         .animation(.snappy(duration: 0.3), value: selection)
     }
 
@@ -161,10 +169,11 @@ private struct Dock: View {
             Avatar(url: auth.user?.photoURL, name: auth.displayName, size: 28)
                 .padding(2)
                 .overlay(Circle().stroke(selected ? Color.brand : Color.clear, lineWidth: 1.5))
+                .scaleEffect(dock.compact ? 0.84 : 1)
         } else {
             DockIcon(kind: tab.dockIcon, selected: selected,
                      color: selected ? Color.brand : .black, size: 26)
-                .scaleEffect(selected ? 1.06 : 1)
+                .scaleEffect((selected ? 1.06 : 1) * (dock.compact ? 0.84 : 1))
         }
     }
 }
@@ -178,7 +187,7 @@ private struct GlassDock: ViewModifier {
             // scrolls behind stays visible but softened, so the icons stay
             // readable.
             content
-                .glassEffect(.regular.tint(.white.opacity(0.18)).interactive(), in: Capsule())
+                .glassEffect(.regular.tint(.white.opacity(0.24)).interactive(), in: Capsule())
                 .environment(\.colorScheme, .light)
         } else {
             content

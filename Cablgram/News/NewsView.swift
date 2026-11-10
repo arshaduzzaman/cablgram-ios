@@ -58,6 +58,7 @@ struct NewsView: View {
                 }
             }
         }
+        .collapsesDock()
         .background(Color(.systemBackground))
         .refreshable {
             Haptics.soft()

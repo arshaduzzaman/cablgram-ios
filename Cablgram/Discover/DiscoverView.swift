@@ -70,6 +70,7 @@ struct DiscoverView: View {
                 }
             }
         }
+        .collapsesDock()
         .background(Color(.systemBackground))
         .refreshable {
             Haptics.soft()
