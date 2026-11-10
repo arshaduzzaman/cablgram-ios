@@ -65,17 +65,18 @@ enum EggArt {
             drip.addQuadCurve(to: CGPoint(x: x + width, y: top - width * 0.6),
                               control: CGPoint(x: x + neck, y: top))
             drip.closeSubpath()
-            // Shadows are the same shape nudged down, not a blur: blurs
-            // get slow with lots of eggs on a post.
-            context.fill(drip.offsetBy(dx: 0, dy: 1.2), with: .color(.black.opacity(0.14)))
-            context.fill(drip, with: .color(white))
+            context.drawLayer { layer in
+                layer.addFilter(.shadow(color: .black.opacity(0.2), radius: 1.5, y: 1))
+                layer.fill(drip, with: .color(white))
+            }
         }
 
         // Egg white: an uneven, glossy puddle.
         let whitePath = blob(center: center, radius: r * spread, rand: rand, salt: 10, wobble: 0.22)
-        context.fill(whitePath.offsetBy(dx: 0, dy: 1.5), with: .color(.black.opacity(0.12)))
-        context.fill(whitePath.offsetBy(dx: 0, dy: 0.7), with: .color(.black.opacity(0.12)))
-        context.fill(whitePath, with: .color(white))
+        context.drawLayer { layer in
+            layer.addFilter(.shadow(color: .black.opacity(0.25), radius: 2, y: 1))
+            layer.fill(whitePath, with: .color(white))
+        }
         context.stroke(whitePath, with: .color(.white), lineWidth: 1.2)
         // Shine on the egg white.
         let shine = CGRect(x: center.x - r * 0.62 * spread, y: center.y - r * 0.55 * spread,
@@ -250,7 +251,10 @@ struct EggLayer: View, Equatable {
     let scale: EggScale
     /// Your splats to outline in pink right now.
     let highlighted: Set<String>
+    /// Eggs are in flight or landing.
     let animating: Bool
+    /// The reveal or a resize is playing, so settled splats move too.
+    let settling: Bool
 
     /// Gap between each splat fading in, kept under a second in total.
     private var stagger: TimeInterval { Self.stagger(for: eggs.count) }
@@ -262,31 +266,53 @@ struct EggLayer: View, Equatable {
     /// How long one splat takes to fade in on the reveal.
     static let fadeIn: TimeInterval = 0.6
 
+    /// Two layers, so a busy post stays smooth: settled splats are drawn
+    /// once (and only redrawn while the reveal or a resize is playing),
+    /// while the eggs in flight get their own small layer that animates
+    /// every frame.
     var body: some View {
-        TimelineView(.animation(paused: !animating)) { timeline in
-            Canvas { context, size in
-                let now = timeline.date
-                let radius = EggArt.size * size.width * scale.value(at: now)
-
-                // Everyone else's first, then yours on top.
-                var order = 0
-                if revealed {
-                    for egg in eggs where !mine.contains(egg.id) {
-                        drawEgg(egg, order: &order, now: now, size: size, radius: radius, in: &context)
-                    }
+        ZStack {
+            TimelineView(.animation(paused: !settling)) { timeline in
+                Canvas(rendersAsynchronously: true) { context, size in
+                    drawSettled(now: timeline.date, size: size, in: &context)
                 }
-                for egg in eggs where mine.contains(egg.id) {
-                    drawEgg(egg, order: &order, now: now, size: size, radius: radius, in: &context)
-                    if highlighted.contains(egg.id), landing[egg.id] == nil {
-                        let center = CGPoint(x: egg.x * size.width, y: egg.y * size.height)
-                        let outline = EggArt.outline(egg.id, at: center, radius: radius * 1.08)
-                        context.stroke(outline, with: .color(.white), lineWidth: 5)
-                        context.stroke(outline, with: .color(.brand), lineWidth: 3)
+            }
+            if !landing.isEmpty {
+                TimelineView(.animation(paused: !animating)) { timeline in
+                    Canvas { context, size in
+                        let now = timeline.date
+                        let radius = EggArt.size * size.width * scale.value(at: now)
+                        var order = 0
+                        for egg in eggs where landing[egg.id] != nil {
+                            drawEgg(egg, order: &order, now: now, size: size, radius: radius, in: &context)
+                        }
                     }
                 }
             }
         }
         .allowsHitTesting(false)
+    }
+
+    private func drawSettled(now: Date, size: CGSize, in context: inout GraphicsContext) {
+        let radius = EggArt.size * size.width * scale.value(at: now)
+        // Everyone else's first, then yours on top.
+        var order = 0
+        if revealed {
+            for egg in eggs where !mine.contains(egg.id) {
+                if landing[egg.id] != nil { order += 1; continue }
+                drawEgg(egg, order: &order, now: now, size: size, radius: radius, in: &context)
+            }
+        }
+        for egg in eggs where mine.contains(egg.id) {
+            if landing[egg.id] != nil { continue }
+            drawEgg(egg, order: &order, now: now, size: size, radius: radius, in: &context)
+            if highlighted.contains(egg.id) {
+                let center = CGPoint(x: egg.x * size.width, y: egg.y * size.height)
+                let outline = EggArt.outline(egg.id, at: center, radius: radius * 1.08)
+                context.stroke(outline, with: .color(.white), lineWidth: 5)
+                context.stroke(outline, with: .color(.brand), lineWidth: 3)
+            }
+        }
     }
 
     /// One egg: flying, landing, popping in after the reveal, or settled.

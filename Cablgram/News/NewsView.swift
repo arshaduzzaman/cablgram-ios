@@ -412,7 +412,8 @@ private struct PostRow: View {
                     .overlay {
                         EggLayer(eggs: revealed ? eggs : [], landing: landing, mine: myEggs, revealed: revealed,
                                  revealStart: revealStart, scale: eggScale, highlighted: crowded ? myEggs : [],
-                                 animating: !landing.isEmpty || animateUntil > .now)
+                                 animating: !landing.isEmpty,
+                                 settling: animateUntil > .now)
                             // Only redraw the splats when something about them changed.
                             .equatable()
                             .opacity(splatsHidden ? 0 : 1)
@@ -761,7 +762,7 @@ private struct PostRow: View {
         let popIn = Double(others) * EggLayer.stagger(for: others) + EggLayer.fadeIn
         eggScale = EggScale(from: 1, to: EggScale.target(for: others + 1),
                             start: start.addingTimeInterval(popIn), duration: 1.1)
-        keepAnimating(until: eggScale.end.addingTimeInterval(2.5))
+        keepAnimating(until: eggScale.end.addingTimeInterval(0.1))
         if others > 0 {
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(0.45))
