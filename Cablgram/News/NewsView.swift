@@ -233,15 +233,6 @@ private struct AimView: View {
                              with: .color(Color.brand))
             }
 
-            // Power ring around the egg.
-            let ring = Path { path in
-                path.addArc(center: a, radius: 30, startAngle: .degrees(-90),
-                            endAngle: .degrees(-90 + 360 * Double(max(power, 0.02))), clockwise: false)
-            }
-            context.stroke(Path(ellipseIn: CGRect(x: a.x - 30, y: a.y - 30, width: 60, height: 60)),
-                           with: .color(.white.opacity(0.35)), lineWidth: 4)
-            context.stroke(ring, with: .color(Color.brand), style: StrokeStyle(lineWidth: 4, lineCap: .round))
-
             // The egg, tipped towards where it's going, shaded to look round.
             let heading = distance > 20 ? Angle(radians: atan2(t.y - a.y, t.x - a.x) + .pi / 2) : .zero
             context.fill(Path(ellipseIn: CGRect(x: a.x - 13, y: a.y + 12, width: 26, height: 8)),
@@ -776,7 +767,13 @@ private struct PostRow: View {
         let target = EggScale.target(for: count)
         let now = Date.now
         let current = eggScale.value(at: now)
-        guard abs(current - target) > 0.01 else { return }
+        guard abs(current - target) > 0.001 else { return }
+        // Small changes (one more egg on a busy post) just snap: animating
+        // them would redraw every splat each frame for nothing you'd see.
+        guard abs(current - target) > 0.06 else {
+            eggScale = .steady(target)
+            return
+        }
         eggScale = EggScale(from: current, to: target, start: now, duration: 0.7)
         keepAnimating(until: eggScale.end)
     }
