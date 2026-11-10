@@ -7,6 +7,7 @@ struct WalkPage: View {
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var leaderboard: LeaderboardStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
 
     @State private var walking = false
     @State private var finishedSteps: Int?
@@ -36,7 +37,11 @@ struct WalkPage: View {
                         .card()
                 }
 
+                sponsorChallenge
                 leaderboardPreview
+                SponsorOffersRow(offers: Sponsor.offers,
+                                 onOpen: { sponsor in sponsor.link.map { openURL($0) } },
+                                 onInvite: inviteSponsor)
                 rewards
 
                 #if DEBUG
@@ -191,6 +196,28 @@ struct WalkPage: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    // MARK: - Sponsors
+
+    /// This week's sponsored challenge, or an invite to sponsor it.
+    @ViewBuilder
+    private var sponsorChallenge: some View {
+        if let sponsor = Sponsor.challenge {
+            SponsorChallengeCard(sponsor: sponsor, weekSteps: steps.stepsThisWeek) {
+                sponsor.link.map { openURL($0) }
+            }
+        } else {
+            Button(action: inviteSponsor) {
+                SponsorInviteCard(wide: true)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func inviteSponsor() {
+        Haptics.tap()
+        if let url = Sponsor.contactURL { openURL(url) }
     }
 
     // MARK: - Helpers
