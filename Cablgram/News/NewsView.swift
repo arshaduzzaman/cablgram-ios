@@ -328,7 +328,7 @@ private struct PostRow: View, Equatable {
     /// The advertisers' banner strip is always the same height relative to
     /// the photo's width (about 7%), whatever the photo's shape, plus a
     /// small gap so nothing touches it.
-    static let bannerHeight: CGFloat = 0.078
+    static let bannerHeight: CGFloat = 0.07
 
     /// Where the banner strip starts, as a fraction of the photo's height.
     /// Eggs can't land or show below it.
