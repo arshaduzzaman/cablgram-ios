@@ -100,7 +100,7 @@ struct MainView: View {
     }
 }
 
-/// The floating tab dock, like Instagram's: a light frosted-glass bar with
+/// The floating tab dock, like Instagram's: a Liquid Glass bar with
 /// a soft grey pill sliding behind the selected tab, dark outline icons
 /// (the selected one filled, in pink), and your profile photo last.
 private struct Dock: View {
@@ -155,20 +155,25 @@ private struct Dock: View {
     }
 }
 
-/// The dock's frosted glass, like Instagram's: a strong blur, a light
-/// white wash, a thin bright edge and a soft shadow.
+/// The dock's glass, like Instagram's: Apple's Liquid Glass on iOS 26+,
+/// and before that a frosted bar with a thin bright edge and soft shadow.
 private struct GlassDock: ViewModifier {
     func body(content: Content) -> some View {
-        content
-            .background {
-                Capsule()
-                    .fill(.ultraThinMaterial)
-                    .overlay(Capsule().fill(.white.opacity(0.22)))
-            }
-            .overlay(Capsule().strokeBorder(.white.opacity(0.9), lineWidth: 1))
-            .overlay(Capsule().strokeBorder(.black.opacity(0.06), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.10), radius: 20, y: 8)
-            .environment(\.colorScheme, .light)
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            content
+                .background {
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .overlay(Capsule().fill(.white.opacity(0.22)))
+                }
+                .overlay(Capsule().strokeBorder(.white.opacity(0.9), lineWidth: 1))
+                .overlay(Capsule().strokeBorder(.black.opacity(0.06), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.10), radius: 20, y: 8)
+                .environment(\.colorScheme, .light)
+        }
     }
 }
 
