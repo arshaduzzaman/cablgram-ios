@@ -100,9 +100,9 @@ struct MainView: View {
     }
 }
 
-/// The floating tab dock: a rounded bar of glass (Liquid Glass on iOS 26+,
-/// frosted blur before that) with a solid pink pill sliding behind the
-/// selected tab, and your profile photo as the last tab.
+/// The floating tab dock, like Instagram's: a light frosted-glass bar with
+/// a soft grey pill sliding behind the selected tab, dark outline icons
+/// (the selected one filled, in pink), and your profile photo last.
 private struct Dock: View {
     @Binding var selection: AppTab
     @EnvironmentObject private var auth: AuthStore
@@ -119,14 +119,13 @@ private struct Dock: View {
                     ZStack {
                         if isSelected {
                             Capsule()
-                                .fill(Color.brand)
-                                .shadow(color: Color.brand.opacity(0.4), radius: 8, y: 3)
+                                .fill(Color.black.opacity(0.07))
                                 .matchedGeometryEffect(id: "pill", in: pill)
                         }
                         icon(for: tab, selected: isSelected)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 50)
+                    .frame(height: 52)
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -136,7 +135,7 @@ private struct Dock: View {
         }
         .padding(6)
         .modifier(GlassDock())
-        .padding(.horizontal, 28)
+        .padding(.horizontal, 22)
         .padding(.bottom, 2)
         .animation(.snappy(duration: 0.3), value: selection)
     }
@@ -145,31 +144,31 @@ private struct Dock: View {
     private func icon(for tab: AppTab, selected: Bool) -> some View {
         if tab == .menu {
             Avatar(url: auth.user?.photoURL, name: auth.displayName, size: 28)
-                .overlay(Circle().stroke(selected ? .white : Color.clear, lineWidth: 2))
                 .padding(2)
+                .overlay(Circle().stroke(selected ? Color.brand : Color.clear, lineWidth: 1.5))
         } else {
             Image(systemName: selected ? tab.selectedIcon : tab.icon)
-                .font(.system(size: 21, weight: selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Color.white : Color.primary.opacity(0.75))
+                .font(.system(size: 22, weight: selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Color.brand : Color.black.opacity(0.85))
                 .symbolEffect(.bounce, value: selected)
         }
     }
 }
 
-/// The dock's glass: Apple's Liquid Glass where available, otherwise a
-/// frosted material with a thin light edge and a soft shadow.
+/// The dock's frosted glass, like Instagram's: a strong blur, a light
+/// white wash, a thin bright edge and a soft shadow.
 private struct GlassDock: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content
-                .glassEffect(.regular.interactive(), in: Capsule())
-                .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
-        } else {
-            content
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().stroke(.white.opacity(0.6), lineWidth: 0.75))
-                .shadow(color: .black.opacity(0.15), radius: 16, y: 6)
-        }
+        content
+            .background {
+                Capsule()
+                    .fill(.ultraThinMaterial)
+                    .overlay(Capsule().fill(.white.opacity(0.22)))
+            }
+            .overlay(Capsule().strokeBorder(.white.opacity(0.9), lineWidth: 1))
+            .overlay(Capsule().strokeBorder(.black.opacity(0.06), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.10), radius: 20, y: 8)
+            .environment(\.colorScheme, .light)
     }
 }
 
