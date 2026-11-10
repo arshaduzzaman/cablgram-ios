@@ -165,6 +165,13 @@ private struct PostRow: View {
     @State private var landing: [String: EggLanding] = [:]
     /// Eggs already on the photo when it appeared (they don't animate).
     @State private var knownEggs: Set<String>?
+    /// Eggs thrown from this phone this session (before Firestore says so).
+    @State private var thrownHere: Set<String> = []
+    /// When everyone else's splats start popping in after your first egg.
+    @State private var revealStart: Date?
+    @State private var eggScale = EggScale.steady(1)
+    /// Keeps the egg animation running until this time.
+    @State private var animateUntil = Date.distantPast
     @State private var eggHaptics = EggHaptics()
 
     var body: some View {
@@ -251,7 +258,11 @@ private struct PostRow: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
-                    .overlay { EggLayer(eggs: eggs, landing: landing) }
+                    .overlay {
+                        EggLayer(eggs: eggs, landing: landing, mine: myEggs, revealed: revealed,
+                                 revealStart: revealStart, scale: eggScale,
+                                 animating: !landing.isEmpty || animateUntil > .now)
+                    }
                     .overlay {
                         PhotoTouchLayer(onHoldBegan: holdBegan,
                                         onHoldMoved: holdMoved,
@@ -384,9 +395,25 @@ private struct PostRow: View {
         case .choosing: return "Slide to Egg or Headline"
         case .eggReady: return "Let go to throw · \(EggPrice.steps) steps"
         case .headlineReady: return "Let go to write a headline"
-        case .idle: return eggs.isEmpty && headlines.isEmpty ? "Hold the photo" : ""
+        case .idle:
+            if !revealed && !eggs.isEmpty {
+                return eggs.count == 1 ? "1 egg hidden · throw one to see it" : "\(eggs.count) eggs hidden · throw one to see them"
+            }
+            return eggs.isEmpty && headlines.isEmpty ? "Hold the photo" : ""
         }
     }
+
+    // MARK: - Eggs
+
+    /// Eggs you threw: from this session, or saved under your account.
+    private var myEggs: Set<String> {
+        var ids = thrownHere
+        if let myID { ids.formUnion(eggs.filter { $0.uid == myID }.map(\.id)) }
+        return ids
+    }
+
+    /// Everyone's splats show once you've thrown an egg at this post.
+    private var revealed: Bool { !myEggs.isEmpty }
 
     // MARK: - Gestures
 
@@ -441,28 +468,77 @@ private struct PostRow: View {
             show("An egg costs \(EggPrice.steps) steps. Go for a walk!")
             return
         }
+        let firstHere = !revealed
         let id = onThrowEgg(spot)
+        thrownHere.insert(id)
         knownEggs?.insert(id)
         landing[id] = EggLanding(start: .now, thrown: true)
         eggHaptics.throwAndSplat(flight: EggLanding.flight)
         finishLanding(id)
+        if firstHere {
+            reveal()
+        } else {
+            resize(to: eggs.count + 1)
+        }
     }
 
-    /// Eggs other people throw land live while you watch.
+    /// Your first egg on a post: once it lands, everyone else's splats pop
+    /// in, then they all shrink together, like zooming out on the wall.
+    private func reveal() {
+        let others = eggs.count
+        let start = Date.now.addingTimeInterval(EggLanding.flight + 0.3)
+        revealStart = start
+        let popIn = min(0.8, Double(others) * 0.06) + 0.35
+        eggScale = EggScale(from: 1, to: EggScale.target(for: others + 1),
+                            start: start.addingTimeInterval(popIn), duration: 1.1)
+        keepAnimating(until: eggScale.end.addingTimeInterval(2.5))
+        if others > 0 {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(EggLanding.flight + 0.3))
+                Haptics.soft()
+            }
+        }
+    }
+
+    /// Eases splats to the right size for `count` eggs.
+    private func resize(to count: Int) {
+        let target = EggScale.target(for: count)
+        let now = Date.now
+        let current = eggScale.value(at: now)
+        guard abs(current - target) > 0.01 else { return }
+        eggScale = EggScale(from: current, to: target, start: now, duration: 0.7)
+        keepAnimating(until: eggScale.end)
+    }
+
+    private func keepAnimating(until date: Date) {
+        animateUntil = max(animateUntil, date)
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(max(date.timeIntervalSinceNow, 0) + 0.1))
+            // Changing it re-renders, so the animation clock can pause.
+            if animateUntil <= .now { animateUntil = .distantPast }
+        }
+    }
+
+    /// Eggs other people throw land live while you watch, once you've
+    /// thrown one yourself.
     private func noticeNewEggs(_ ids: [String]) {
         guard var known = knownEggs else {
             knownEggs = Set(ids)
+            // Already thrown here before: everything shows, at the right size.
+            if revealed { eggScale = .steady(EggScale.target(for: ids.count)) }
             return
         }
         let fresh = ids.filter { !known.contains($0) }
         guard !fresh.isEmpty else { return }
-        for id in fresh {
-            known.insert(id)
+        fresh.forEach { known.insert($0) }
+        knownEggs = known
+        guard revealed else { return }
+        for id in fresh where !thrownHere.contains(id) {
             landing[id] = EggLanding(start: .now, thrown: false)
             finishLanding(id)
         }
-        knownEggs = known
-        eggHaptics.splat()
+        if fresh.contains(where: { !thrownHere.contains($0) }) { eggHaptics.splat() }
+        resize(to: ids.count)
     }
 
     private func finishLanding(_ id: String) {

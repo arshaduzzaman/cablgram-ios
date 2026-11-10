@@ -196,30 +196,91 @@ struct EggLanding: Equatable {
     func impactTime() -> TimeInterval { thrown ? Self.flight : 0 }
 }
 
+/// How big splats are drawn, animating smoothly between sizes: the more
+/// eggs on a post, the smaller each one, so a crowded photo reads like
+/// zooming out on a wall of eggs.
+struct EggScale: Equatable {
+    var from: Double
+    var to: Double
+    var start: Date
+    var duration: TimeInterval
+
+    static func steady(_ value: Double) -> EggScale {
+        EggScale(from: value, to: value, start: .distantPast, duration: 0)
+    }
+
+    var end: Date { start.addingTimeInterval(duration) }
+
+    func value(at date: Date) -> Double {
+        guard duration > 0 else { return to }
+        let t = min(max(date.timeIntervalSince(start) / duration, 0), 1)
+        let eased = t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
+        return from + (to - from) * eased
+    }
+
+    /// Splat size for a post with `count` eggs: full size up to five, then
+    /// shrinking (never below a third) as the photo fills up.
+    static func target(for count: Int) -> Double {
+        count <= 5 ? 1 : max(0.32, (5 / Double(count)).squareRoot())
+    }
+}
+
 /// Splats on the photo, with any eggs that are mid-flight or landing
-/// animated. Draws in the photo's coordinates.
+/// animated. Other people's splats stay hidden until you've thrown one;
+/// then they pop in one after another. Draws in the photo's coordinates.
 struct EggLayer: View {
     let eggs: [EggMark]
     let landing: [String: EggLanding]
+    /// Eggs you threw: always shown.
+    let mine: Set<String>
+    /// Whether everyone else's eggs are shown.
+    let revealed: Bool
+    /// When the others start popping in (nil: they're just there).
+    let revealStart: Date?
+    let scale: EggScale
+    let animating: Bool
+
+    /// Gap between each splat popping in, kept under a second in total.
+    private var stagger: TimeInterval {
+        let others = eggs.count - mine.count
+        return others > 1 ? min(0.06, 0.8 / Double(others)) : 0
+    }
 
     var body: some View {
-        TimelineView(.animation(paused: landing.isEmpty)) { timeline in
+        TimelineView(.animation(paused: !animating)) { timeline in
             Canvas { context, size in
-                let radius = EggArt.size * size.width
+                let now = timeline.date
+                let radius = EggArt.size * size.width * scale.value(at: now)
+                var order = 0
                 for egg in eggs {
                     let center = CGPoint(x: egg.x * size.width, y: egg.y * size.height)
-                    guard let anim = landing[egg.id] else {
-                        EggArt.draw(egg.id, at: center, radius: radius, progress: .final, in: &context)
+                    let isMine = mine.contains(egg.id)
+                    if !isMine && !revealed { continue }
+
+                    if let anim = landing[egg.id] {
+                        let t = now.timeIntervalSince(anim.start)
+                        let impact = anim.impactTime()
+                        if t < impact {
+                            flying(t / impact, to: center, size: size, radius: radius, in: &context)
+                        } else {
+                            EggArt.draw(egg.id, at: center, radius: radius,
+                                        progress: Self.progress(after: t - impact), in: &context)
+                        }
                         continue
                     }
-                    let t = timeline.date.timeIntervalSince(anim.start)
-                    let impact = anim.impactTime()
-                    if t < impact {
-                        flying(t / impact, to: center, size: size, radius: radius, in: &context)
-                    } else {
-                        EggArt.draw(egg.id, at: center, radius: radius,
-                                    progress: Self.progress(after: t - impact), in: &context)
+
+                    if !isMine, let revealStart {
+                        let appear = revealStart.addingTimeInterval(Double(order) * stagger)
+                        order += 1
+                        let t = now.timeIntervalSince(appear)
+                        if t < 0 { continue }
+                        if t < 2.5 {
+                            EggArt.draw(egg.id, at: center, radius: radius,
+                                        progress: Self.progress(after: t), in: &context)
+                            continue
+                        }
                     }
+                    EggArt.draw(egg.id, at: center, radius: radius, progress: .final, in: &context)
                 }
             }
         }

@@ -39,6 +39,18 @@ final class NewsSocial: ObservableObject {
             registrations.forEach { $0.remove() }
             listeners[id] = nil
         }
+        #if DEBUG
+        // `-sampleEggs` launch argument: scatter made-up eggs on posts so the
+        // reveal can be tried without other people (test builds only).
+        if uid == nil, ProcessInfo.processInfo.arguments.contains("-sampleEggs") {
+            for id in ids where eggs[id] == nil {
+                let count = Int.random(in: 3...28)
+                eggs[id] = (0..<count).map { i in
+                    EggMark(id: "sample-\(id)-\(i)", x: .random(in: 0.08...0.92), y: .random(in: 0.08...0.92), uid: "sample")
+                }
+            }
+        }
+        #endif
         guard uid != nil else { return }
 
         for id in ids where listeners[id] == nil {
