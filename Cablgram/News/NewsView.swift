@@ -137,6 +137,55 @@ private enum HoldMode: Equatable {
     case aiming
 }
 
+/// A rounded pill in the actions row; tinted pink when it's "on".
+private struct ActionPill<Content: View>: View {
+    let tint: Color?
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        HStack(spacing: 6) { content }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 13)
+            .frame(height: 36)
+            .background((tint?.opacity(0.12) ?? Color(.secondarySystemBackground)), in: Capsule())
+            .contentShape(Capsule())
+    }
+}
+
+/// A count in a pill that rolls when it changes.
+private struct PillCount: View {
+    let value: Int
+    let highlighted: Bool
+
+    var body: some View {
+        Text(value.formatted(.number.notation(.compactName)))
+            .font(.system(.subheadline, design: .rounded).weight(.semibold).monospacedDigit())
+            .foregroundStyle(highlighted ? Color.brand : .primary)
+            .contentTransition(.numericText(value: Double(value)))
+    }
+}
+
+/// Pills squish a little under your finger.
+private struct PillPress: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+/// A small drawn egg for the egg pill, to match the hearts and pencils.
+private struct EggGlyph: View {
+    var body: some View {
+        Canvas { context, size in
+            let egg = EggArt.egg(center: CGPoint(x: size.width / 2, y: size.height / 2),
+                                 size: size.height, angle: .zero)
+            context.fill(egg, with: .color(EggArt.shell))
+            context.stroke(egg, with: .color(.primary), lineWidth: 1.8)
+        }
+    }
+}
+
 /// The aiming picture, drawn in one Canvas.
 private struct AimView: View {
     /// Fractions of the photo.
@@ -455,70 +504,76 @@ private struct PostRow: View {
 
     // MARK: - Counts row
 
+    /// Love, eggs and headline as soft pills, with a quiet hint below.
     private var actions: some View {
-        HStack(spacing: 16) {
-            Button {
-                let loving = !loved
-                if loving { Haptics.success() } else { Haptics.tap() }
-                onLove(loving)
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: loved ? "heart.fill" : "heart")
-                        .font(.system(size: 19))
-                        .foregroundStyle(loved ? Color.brand : .primary)
-                        .symbolEffect(.bounce, value: loved)
-                    if !lovers.isEmpty {
-                        Text(lovers.count.formatted())
-                            .font(.subheadline.weight(.medium).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .contentTransition(.numericText(value: Double(lovers.count)))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Button {
+                    let loving = !loved
+                    if loving { Haptics.success() } else { Haptics.tap() }
+                    onLove(loving)
+                } label: {
+                    ActionPill(tint: loved ? Color.brand : nil) {
+                        Image(systemName: loved ? "heart.fill" : "heart")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(loved ? Color.brand : .primary)
+                            .symbolEffect(.bounce, value: loved)
+                        if !lovers.isEmpty {
+                            PillCount(value: lovers.count, highlighted: loved)
+                        }
                     }
                 }
-                .padding(.vertical, 6)
-                .contentShape(Rectangle())
+                .buttonStyle(PillPress())
                 .animation(.snappy, value: lovers.count)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(loved ? "Unlove" : "Love")
-            .accessibilityValue(lovers.count == 1 ? "1 love" : "\(lovers.count) loves")
+                .animation(.snappy, value: loved)
+                .accessibilityLabel(loved ? "Unlove" : "Love")
+                .accessibilityValue(lovers.count == 1 ? "1 love" : "\(lovers.count) loves")
 
-            if !eggs.isEmpty {
-                HStack(spacing: 3) {
-                    Text("🥚")
-                        .font(.system(size: 15))
-                    Text(eggs.count.formatted())
-                        .font(.subheadline.weight(.medium).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .contentTransition(.numericText(value: Double(eggs.count)))
+                Button {
+                    Haptics.tap()
+                    show("Hold the photo, pull back and let go to throw")
+                } label: {
+                    ActionPill(tint: nil) {
+                        EggGlyph()
+                            .frame(width: 15, height: 18)
+                        if !eggs.isEmpty {
+                            PillCount(value: eggs.count, highlighted: false)
+                        }
+                    }
                 }
+                .buttonStyle(PillPress())
                 .animation(.snappy, value: eggs.count)
-                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(eggs.count == 1 ? "1 egg thrown" : "\(eggs.count) eggs thrown")
+                .accessibilityHint("Hold the photo to throw an egg")
+
+                Spacer(minLength: 0)
+
+                Button {
+                    Haptics.tap()
+                    showHeadlines = true
+                } label: {
+                    ActionPill(tint: nil) {
+                        Image(systemName: "pencil.line")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("Headline")
+                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    }
+                }
+                .buttonStyle(PillPress())
+                .accessibilityLabel("Write a headline")
             }
 
-            Button {
-                Haptics.tap()
-                showHeadlines = true
-            } label: {
-                Image(systemName: "pencil.line")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 2)
-                    .contentShape(Rectangle())
+            if !hint.isEmpty {
+                Text(hint)
+                    .font(.footnote)
+                    .foregroundStyle(notice == nil && mode == .idle ? .tertiary : .secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .padding(.leading, 4)
+                    .transition(.opacity)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Write a headline")
-
-            Spacer(minLength: 0)
-
-            Text(hint)
-                .font(.caption)
-                .foregroundStyle(notice == nil && mode == .idle ? .tertiary : .secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .animation(.snappy, value: hint)
         }
+        .animation(.snappy, value: hint)
     }
 
     private var hint: String {
