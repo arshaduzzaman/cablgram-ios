@@ -781,7 +781,9 @@ private struct PostRow: View, Equatable {
     private func landingLimit(in size: CGSize) -> CGFloat {
         guard size.height > 0 else { return 0.5 }
         let radius = EggArt.size * size.width * eggScale.to
-        return max(0.2, Self.bannerTop(in: size) - radius * 3.1 / size.height)
+        // The furthest any bit reaches below the hit is about 3.3 radii
+        // (droplets on a hard hit); keep a little extra room on top.
+        return max(0.2, Self.bannerTop(in: size) - radius * 3.8 / size.height)
     }
 
     /// Let go to throw from your hand to the target.

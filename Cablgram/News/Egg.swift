@@ -109,9 +109,9 @@ enum EggArt {
         for i in 0..<6 {
             let stays = i < 3
             let angle = rand.next(i, 50) * 2 * .pi
-            let reach = stays ? 0.7 + rand.next(i, 51) * 0.5 : 1.6 + rand.next(i, 51) * 1.4
+            let reach = stays ? 0.7 + rand.next(i, 51) * 0.5 : 1.4 + rand.next(i, 51) * 0.8
             let t = CGFloat(easeOut(p.shells))
-            let distance = r * CGFloat(reach * p.burst) * t
+            let distance = r * CGFloat(reach * min(p.burst, 1.15)) * t
             let fade = stays ? 1 : max(1 - p.shells * 1.2, 0)
             guard fade > 0 else { continue }
             let point = CGPoint(x: center.x + cos(angle) * distance,
