@@ -9,8 +9,6 @@ struct WalkPage: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
 
-    @State private var walking = false
-    @State private var finishedSteps: Int?
     @State private var showingLeaderboard = false
     @State private var showingGoalPicker = false
     @State private var justClaimed: Reward?
@@ -23,8 +21,7 @@ struct WalkPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
-                GoalHero(onStartWalk: { walking = true },
-                         onChangeGoal: { showingGoalPicker = true },
+                GoalHero(onChangeGoal: { showingGoalPicker = true },
                          onClaim: claim,
                          onOpenLeaderboard: { showingLeaderboard = true })
 
@@ -72,28 +69,6 @@ struct WalkPage: View {
         }
         .onChange(of: myRank) { old, new in
             if celebrationsReady, let old, let new, new < old { Haptics.success() }
-        }
-        .fullScreenCover(isPresented: $walking) {
-            WalkNavigationView { walked in
-                walking = false
-                finishedSteps = walked
-                Task { await steps.refresh() }
-            }
-            .environmentObject(steps)
-            .tint(.brand)
-        }
-        .alert("Nice walk! 🎉", isPresented: Binding(
-            get: { finishedSteps != nil },
-            set: { if !$0 { finishedSteps = nil } }
-        )) {
-            Button("Done") { finishedSteps = nil }
-        } message: {
-            let walked = finishedSteps ?? 0
-            if let goal = steps.goalReward {
-                Text("You walked \(walked.formatted()) steps. \(steps.stepsToGoal == 0 ? "\(goal.fullName) is ready to claim!" : "\(steps.stepsToGoal.formatted()) more to \(goal.fullName).")")
-            } else {
-                Text("You walked \(walked.formatted()) steps.")
-            }
         }
         .sheet(isPresented: $showingLeaderboard) {
             NavigationStack {

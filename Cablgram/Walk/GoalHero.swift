@@ -1,11 +1,10 @@
 import SwiftUI
 
 /// Top of the Walk page: the prize you're walking for, how far away it is,
-/// how long that takes, and a button to start walking.
+/// and how long that takes.
 struct GoalHero: View {
     @EnvironmentObject private var steps: StepStore
 
-    let onStartWalk: () -> Void
     let onChangeGoal: () -> Void
     let onClaim: (Reward) -> Void
     var onOpenLeaderboard: () -> Void = {}
@@ -106,19 +105,6 @@ struct GoalHero: View {
                 Image(systemName: "clock").foregroundStyle(Color.brand)
             }
             .font(.subheadline)
-
-            Button {
-                Haptics.press()
-                onStartWalk()
-            } label: {
-                Label("Start a walk", systemImage: "figure.walk")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 52)
-                    .background(Color.brand, in: Capsule())
-            }
-            .buttonStyle(.plain)
         }
     }
 
