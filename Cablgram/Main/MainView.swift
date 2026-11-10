@@ -154,8 +154,8 @@ private struct Dock: View {
                 .overlay(Circle().stroke(selected ? Color.brand : Color.clear, lineWidth: 1.5))
         } else {
             Image(systemName: selected ? tab.selectedIcon : tab.icon)
-                .font(.system(size: 22, weight: selected ? .semibold : .regular))
-                .foregroundStyle(selected ? Color.brand : Color.black.opacity(0.85))
+                .font(.system(size: 22, weight: selected ? .semibold : .medium))
+                .foregroundStyle(selected ? Color.brand : Color.black)
                 .symbolEffect(.bounce, value: selected)
         }
     }
@@ -166,8 +166,17 @@ private struct Dock: View {
 private struct GlassDock: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
+            // Frosted, like Instagram's: a strong blur and a white wash under
+            // the glass, so what scrolls behind turns soft and the icons stay
+            // crisp, with Liquid Glass edges and shine on top.
             content
-                .glassEffect(.regular.interactive(), in: Capsule())
+                .background {
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .overlay(Capsule().fill(.white.opacity(0.35)))
+                }
+                .glassEffect(.regular.tint(.white.opacity(0.35)).interactive(), in: Capsule())
+                .environment(\.colorScheme, .light)
         } else {
             content
                 .background {
