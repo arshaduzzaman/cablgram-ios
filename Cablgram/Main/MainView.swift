@@ -84,13 +84,20 @@ struct MainView: View {
         .environment(\.dockState, dock)
         .background(Color(.systemBackground))
         .safeAreaInset(edge: .top, spacing: 0) {
-            HStack {
-                Text("cablgram.")
+            HStack(alignment: .lastTextBaseline, spacing: 1.5) {
+                Text("cablgram")
                     .font(.wordmark(28))
                     .tracking(-0.8)
-                    .foregroundStyle(.white)
+                // A perfectly round dot, like the logo (the font's own
+                // full stop is squarish).
+                Circle()
+                    .frame(width: 6.5, height: 6.5)
+                    .alignmentGuide(.lastTextBaseline) { d in d[.bottom] }
                 Spacer()
             }
+            .foregroundStyle(.white)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("cablgram")
             .padding(.horizontal, 16)
             .padding(.top, 2)
             .padding(.bottom, 10)
