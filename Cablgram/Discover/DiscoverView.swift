@@ -14,14 +14,7 @@ struct DiscoverView: View {
         return store.current.filter { $0.categories?.contains(category) == true }
     }
 
-    /// Categories that have something on, most events first.
-    private var categories: [String] {
-        var counts: [String: Int] = [:]
-        for event in store.current {
-            for name in event.categories ?? [] { counts[name, default: 0] += 1 }
-        }
-        return counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.map(\.key)
-    }
+    private var categories: [String] { store.categories }
 
     var body: some View {
         ScrollView {
@@ -76,7 +69,7 @@ struct DiscoverView: View {
             Haptics.soft()
             await store.refresh()
         }
-        .task { await store.refresh() }
+        .task { await store.refreshIfStale() }
         .sheet(item: $opened) { event in
             if let url = event.pageURL {
                 SafariView(url: url)
@@ -167,7 +160,7 @@ private struct EventRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            RemoteImage(url: event.imageURL)
+            RemoteImage(url: event.imageURL, maxSide: 74)
                 .frame(width: 74, height: 74)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
@@ -212,7 +205,7 @@ private struct FeaturedCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            RemoteImage(url: event.bannerURL)
+            RemoteImage(url: event.bannerURL, maxSide: 400)
                 .aspectRatio(8 / 3, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(alignment: .topLeading) {
@@ -263,9 +256,13 @@ private struct SourceTag: View {
     }
 }
 
-/// A picture from the web, kept on disk by the shared photo cache.
+/// A picture from the web, kept on disk by the shared photo cache and
+/// shrunk to the size it's shown at (off the main thread) so scrolling and
+/// switching tabs stay smooth.
 private struct RemoteImage: View {
     let url: URL?
+    /// Longest side it's shown at, in points.
+    var maxSide: CGFloat
     @State private var image: UIImage?
 
     var body: some View {
@@ -280,8 +277,9 @@ private struct RemoteImage: View {
         .clipped()
         .task(id: url) {
             guard let url else { return }
-            image = PhotoCache.shared.cached(url.absoluteString)
-            if image == nil { image = await PhotoCache.shared.load(url.absoluteString) }
+            let side = maxSide * UIScreen.main.scale
+            image = PhotoCache.shared.cachedThumbnail(url.absoluteString, maxSide: side)
+            if image == nil { image = await PhotoCache.shared.thumbnail(url.absoluteString, maxSide: side) }
         }
     }
 }

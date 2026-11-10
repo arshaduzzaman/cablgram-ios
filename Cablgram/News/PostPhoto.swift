@@ -34,6 +34,24 @@ final class PhotoCache {
 
     func cached(_ url: String) -> UIImage? { cache.object(forKey: url as NSString) }
 
+    /// A small, already-decoded copy for thumbnails.
+    func cachedThumbnail(_ url: String, maxSide: CGFloat) -> UIImage? {
+        cache.object(forKey: "\(url)#\(Int(maxSide))" as NSString)
+    }
+
+    func thumbnail(_ url: String, maxSide: CGFloat) async -> UIImage? {
+        let key = "\(url)#\(Int(maxSide))" as NSString
+        if let hit = cache.object(forKey: key) { return hit }
+        guard let link = URL(string: url),
+              let (data, _) = try? await session.data(from: link),
+              let full = UIImage(data: data) else { return nil }
+        let scale = min(1, maxSide / max(full.size.width, full.size.height, 1))
+        let size = CGSize(width: full.size.width * scale, height: full.size.height * scale)
+        guard let small = await full.byPreparingThumbnail(ofSize: size) else { return nil }
+        cache.setObject(small, forKey: key)
+        return small
+    }
+
     /// Photos are also kept on disk (up to 300 MB), so they show instantly
     /// next time the app opens instead of downloading again.
     private let session: URLSession = {
@@ -49,7 +67,9 @@ final class PhotoCache {
         if let hit = cached(url) { return hit }
         guard let link = URL(string: url),
               let (data, _) = try? await session.data(from: link),
-              let image = UIImage(data: data) else { return nil }
+              let decoded = UIImage(data: data) else { return nil }
+        // Decode now, off the main thread, rather than while drawing.
+        let image = await decoded.byPreparingForDisplay() ?? decoded
         cache.setObject(image, forKey: url as NSString)
         return image
     }

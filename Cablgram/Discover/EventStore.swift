@@ -73,12 +73,16 @@ struct ListedEvent: Codable, Identifiable, Hashable {
         return calendar.isDate(a, inSameDayAs: b)
     }
 
+    /// Making a date parser is slow, so two are made once and reused.
+    private nonisolated(unsafe) static let plainParser = ISO8601DateFormatter()
+    private nonisolated(unsafe) static let fractionalParser: ISO8601DateFormatter = {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return parser
+    }()
+
     static func parse(_ text: String) -> Date? {
-        let plain = ISO8601DateFormatter()
-        if let date = plain.date(from: text) { return date }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: text)
+        plainParser.date(from: text) ?? fractionalParser.date(from: text)
     }
 
     private static func absolute(_ path: String?) -> URL? {
@@ -102,7 +106,17 @@ struct ListedEvent: Codable, Identifiable, Hashable {
 /// to each event's page.
 @MainActor
 final class EventStore: ObservableObject {
-    @Published private(set) var events: [ListedEvent] = []
+    @Published private(set) var events: [ListedEvent] = [] {
+        didSet { sortLists() }
+    }
+    /// Events you can still go to: happening now first, then soonest first.
+    @Published private(set) var current: [ListedEvent] = []
+    /// The sites' own featured picks (Tickify's featured, Quicket's
+    /// highlights), soonest first.
+    @Published private(set) var featured: [ListedEvent] = []
+    /// Categories that have something on, most events first.
+    @Published private(set) var categories: [String] = []
+    private var loadedAt: Date?
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
 
@@ -116,25 +130,33 @@ final class EventStore: ObservableObject {
         if let data = try? Data(contentsOf: Self.savedURL),
            let saved = try? JSONDecoder().decode([ListedEvent].self, from: data) {
             events = saved
+            sortLists()
         }
     }
 
-    /// Events you can still go to: happening now first, then soonest first.
-    var current: [ListedEvent] {
+    /// Works the lists out once when the events change, not on every redraw.
+    private func sortLists() {
         let now = Date.now
-        return events
-            .filter { ($0.status == "live" || $0.status == "upcoming") && ($0.endDate ?? .distantFuture) > now }
+        let dated = events.map { (event: $0, start: $0.startDate ?? .distantFuture, end: $0.endDate ?? .distantFuture) }
+        let on = dated
+            .filter { ($0.event.status == "live" || $0.event.status == "upcoming") && $0.end > now }
             .sorted { a, b in
-                if a.isLive != b.isLive { return a.isLive }
-                return (a.startDate ?? .distantFuture) < (b.startDate ?? .distantFuture)
+                if a.event.isLive != b.event.isLive { return a.event.isLive }
+                return a.start < b.start
             }
+        current = on.map(\.event)
+        featured = on.filter { $0.event.featuredRank != nil }.sorted { $0.start < $1.start }.map(\.event)
+        var counts: [String: Int] = [:]
+        for event in current {
+            for name in event.categories ?? [] { counts[name, default: 0] += 1 }
+        }
+        categories = counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }.map(\.key)
     }
 
-    /// The sites' own featured picks (Tickify's featured, Quicket's
-    /// highlights), soonest first.
-    var featured: [ListedEvent] {
-        current.filter { $0.featuredRank != nil }
-            .sorted { ($0.startDate ?? .distantFuture) < ($1.startDate ?? .distantFuture) }
+    /// Reloads when opening the tab, at most every 10 minutes.
+    func refreshIfStale() async {
+        if let loadedAt, Date.now.timeIntervalSince(loadedAt) < 600 { return }
+        await refresh()
     }
 
     func refresh() async {
@@ -156,7 +178,8 @@ final class EventStore: ObservableObject {
 
         let seen = Set(tickifyList.map { Self.key($0.title) })
         let list = tickifyList + quicketList.filter { !seen.contains(Self.key($0.title)) }
-        events = list
+        if list != events { events = list }
+        loadedAt = .now
         errorMessage = nil
         if let saved = try? JSONEncoder().encode(list) {
             try? saved.write(to: Self.savedURL, options: .atomic)
