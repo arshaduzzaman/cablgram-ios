@@ -184,6 +184,25 @@ private struct EggIcon: Shape {
     }
 }
 
+/// Where the hold started, where the egg will land and where your finger
+/// is, as fractions of the photo.
+private final class AimState: ObservableObject {
+    @Published var anchor: CGPoint?
+    @Published var target: CGPoint?
+    @Published var finger: CGPoint?
+}
+
+/// Watches the aim, so only this redraws as your finger moves.
+private struct AimOverlay: View {
+    @ObservedObject var aim: AimState
+
+    var body: some View {
+        if let anchor = aim.anchor, let target = aim.target {
+            AimView(anchor: anchor, target: target, finger: aim.finger ?? anchor)
+        }
+    }
+}
+
 /// The aiming picture, drawn in one Canvas.
 private struct AimView: View {
     /// Fractions of the photo.
@@ -286,13 +305,10 @@ private struct PostRow: View {
     @State private var loadFailed = false
 
     @State private var mode: HoldMode = .idle
-    /// Where the hold started, as fractions of the photo.
-    /// While aiming: where your finger (and the egg) is, and where it will
-    /// land, as fractions of the photo.
-    @State private var aimHand: CGPoint?
-    @State private var aimTarget: CGPoint?
-    /// Where your finger is while pulling back, as fractions of the photo.
-    @State private var aimFinger: CGPoint?
+    /// The aim while holding. Kept in an object only the aiming line
+    /// watches, so dragging your finger redraws just the line, not the
+    /// whole post with all its splats.
+    @State private var aim = AimState()
     /// Goes up each time an egg lands, to shake the post.
     @State private var shakes = 0
     @State private var notice: String?
@@ -481,8 +497,8 @@ private struct PostRow: View {
     /// small dot where it'll land.
     @ViewBuilder
     private var holdOverlay: some View {
-        if mode == .aiming, let hand = aimHand, let target = aimTarget {
-            AimView(anchor: hand, target: target, finger: aimFinger ?? hand)
+        if mode == .aiming {
+            AimOverlay(aim: aim)
                 .allowsHitTesting(false)
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
         }
@@ -677,7 +693,7 @@ private struct PostRow: View {
     /// anchor. Let go without pulling and it lands right there.
     private func holdBegan(at point: CGPoint, in size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
-        aimHand = CGPoint(x: point.x / size.width, y: point.y / size.height)
+        aim.anchor = CGPoint(x: point.x / size.width, y: point.y / size.height)
         aim(at: point, in: size)
         Haptics.press()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) { mode = .aiming }
@@ -692,8 +708,8 @@ private struct PostRow: View {
 
     private func aim(at point: CGPoint, in size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
-        guard let hand = aimHand else { return }
-        aimFinger = CGPoint(x: point.x / size.width, y: point.y / size.height)
+        guard let hand = aim.anchor else { return }
+        aim.finger = CGPoint(x: point.x / size.width, y: point.y / size.height)
         let anchor = CGPoint(x: hand.x * size.width, y: hand.y * size.height)
         let dx = point.x - anchor.x, dy = point.y - anchor.y
         let pulled = hypot(dx, dy)
@@ -704,19 +720,19 @@ private struct PostRow: View {
         let reach = max(pulled - deadZone, 0) * 2.4
         let x = anchor.x + direction.dx * reach
         let y = anchor.y + direction.dy * reach
-        aimTarget = CGPoint(x: min(max(x / size.width, 0.04), 0.96),
+        aim.target = CGPoint(x: min(max(x / size.width, 0.04), 0.96),
                             y: min(max(y / size.height, 0.04), 0.96))
     }
 
     /// Let go to throw from your hand to the target.
     private func holdEnded() {
-        if mode == .aiming, let target = aimTarget {
-            throwEgg(at: target, from: aimHand)
+        if mode == .aiming, let target = aim.target {
+            throwEgg(at: target, from: aim.anchor)
         }
         withAnimation(.snappy) { mode = .idle }
-        aimHand = nil
-        aimTarget = nil
-        aimFinger = nil
+        aim.anchor = nil
+        aim.target = nil
+        aim.finger = nil
     }
 
     /// Throws an egg (free) at `spot`, flying from `from` (your finger) or
@@ -818,9 +834,9 @@ private struct PostRow: View {
 
     /// Resets a hold that's cut short (row scrolled away).
     private func cancelHold() {
-        aimHand = nil
-        aimTarget = nil
-        aimFinger = nil
+        aim.anchor = nil
+        aim.target = nil
+        aim.finger = nil
         mode = .idle
     }
 
