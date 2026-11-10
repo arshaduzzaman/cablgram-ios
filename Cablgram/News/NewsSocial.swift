@@ -77,7 +77,10 @@ final class NewsSocial: ObservableObject {
                                        y: Self.number(data["y"]),
                                        uid: data["uid"] as? String)
                     }
-                    Task { @MainActor in self?.eggs[id] = eggs }
+                    Task { @MainActor in
+                        // Only publish real changes: every publish redraws the feed.
+                        if self?.eggs[id] != eggs { self?.eggs[id] = eggs }
+                    }
                 }
 
             let headlines = doc.collection("headlines")
@@ -93,7 +96,9 @@ final class NewsSocial: ObservableObject {
                                         steps: Int(Self.number(data["steps"])),
                                         uid: data["uid"] as? String)
                     }
-                    Task { @MainActor in self?.headlines[id] = headlines }
+                    Task { @MainActor in
+                        if self?.headlines[id] != headlines { self?.headlines[id] = headlines }
+                    }
                 }
 
             let loves = doc.collection("loves")
@@ -101,7 +106,9 @@ final class NewsSocial: ObservableObject {
                 .addSnapshotListener { [weak self] snapshot, _ in
                     guard let documents = snapshot?.documents else { return }
                     let lovers = Set(documents.map(\.documentID))
-                    Task { @MainActor in self?.loves[id] = lovers }
+                    Task { @MainActor in
+                        if self?.loves[id] != lovers { self?.loves[id] = lovers }
+                    }
                 }
 
             listeners[id] = [eggs, headlines, loves]

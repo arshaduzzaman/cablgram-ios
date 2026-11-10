@@ -12,8 +12,9 @@ struct NewsView: View {
     @EnvironmentObject private var auth: AuthStore
     @StateObject private var feed = NewsFeed()
     @StateObject private var social = NewsSocial()
-    /// Posts currently on screen; only these are listened to.
-    @State private var onScreen: [String] = []
+    /// Posts currently on screen; only these are listened to. Not state:
+    /// changing it as you scroll shouldn't redraw the feed.
+    @State private var onScreen = OnScreen()
 
     var body: some View {
         ScrollView {
@@ -43,12 +44,13 @@ struct NewsView: View {
                             onHeadline: { text, amount in
                                 social.postHeadline(text, steps: amount, by: auth.displayName, on: post.id)
                             })
+                        .equatable()
                         .hairline()
                         .onAppear {
-                            if !onScreen.contains(post.id) { onScreen.append(post.id) }
+                            onScreen.add(post.id) { social.watch($0) }
                             if post.id == feed.posts.last?.id { Task { await feed.loadMore() } }
                         }
-                        .onDisappear { onScreen.removeAll { $0 == post.id } }
+                        .onDisappear { onScreen.remove(post.id) { social.watch($0) } }
                 }
 
                 if feed.isLoading {
@@ -68,7 +70,6 @@ struct NewsView: View {
             // Shows last time's posts straight away, then swaps in fresh ones.
             await feed.refresh()
         }
-        .onChange(of: onScreen) { _, ids in social.watch(ids) }
         .overlay(alignment: .top) {
             if let problem = social.problem {
                 Label(problem, systemImage: "exclamationmark.triangle.fill")
@@ -284,7 +285,43 @@ private struct LoveBurst: Equatable {
 /// One post: Cablgram's avatar on the left, then name, time, the headline
 /// people paid steps for, the photo (with everyone's eggs on it), and a
 /// slim counts row.
-private struct PostRow: View {
+/// The posts on screen. Tells the listener which to follow, a moment after
+/// scrolling settles rather than on every row that flicks past.
+@MainActor
+private final class OnScreen {
+    private var ids: [String] = []
+    private var pending: Task<Void, Never>?
+
+    func add(_ id: String, then watch: @escaping ([String]) -> Void) {
+        guard !ids.contains(id) else { return }
+        ids.append(id)
+        schedule(watch)
+    }
+
+    func remove(_ id: String, then watch: @escaping ([String]) -> Void) {
+        ids.removeAll { $0 == id }
+        schedule(watch)
+    }
+
+    private func schedule(_ watch: @escaping ([String]) -> Void) {
+        pending?.cancel()
+        pending = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let self, !Task.isCancelled else { return }
+            watch(self.ids)
+        }
+    }
+}
+
+private struct PostRow: View, Equatable {
+    /// Rows only redraw when what they show changes (the actions are the
+    /// same each time, so they're left out).
+    static func == (a: PostRow, b: PostRow) -> Bool {
+        a.post == b.post && a.eggs == b.eggs && a.headlines == b.headlines
+            && a.myID == b.myID && a.lovers == b.lovers && a.myLoveKey == b.myLoveKey
+            && a.myName == b.myName && a.myPhotoURL == b.myPhotoURL && a.availableSteps == b.availableSteps
+    }
+
     let post: NewsPost
     let eggs: [EggMark]
     let headlines: [Headline]

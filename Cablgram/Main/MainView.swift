@@ -46,14 +46,13 @@ enum AppTab: String, CaseIterable, Identifiable {
 /// pages side by side (swipe left and right to move between them, like
 /// Instagram), and a floating, rounded pink dock at the bottom.
 struct MainView: View {
-    @EnvironmentObject private var auth: AuthStore
-    @EnvironmentObject private var steps: StepStore
-    @EnvironmentObject private var leaderboard: LeaderboardStore
     @State private var tab: AppTab = .news
     /// The page mostly on screen while you swipe, so the dock follows your
     /// finger instead of waiting for the swipe to settle.
     @State private var showing: AppTab = .news
-    @StateObject private var dock = DockState()
+    /// Held, not watched: when the dock shrinks only the dock redraws, not
+    /// every page.
+    @State private var dock = DockState()
 
     var body: some View {
         // The pages run all the way to the bottom of the screen and the dock
@@ -80,9 +79,9 @@ struct MainView: View {
             .contentMargins(.bottom, 92, for: .scrollContent)
             .ignoresSafeArea(edges: .bottom)
 
-            Dock(selection: $tab, showing: showing)
+            Dock(selection: $tab, showing: showing, dock: dock)
         }
-        .environmentObject(dock)
+        .environment(\.dockState, dock)
         .background(Color(.systemBackground))
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
@@ -104,29 +103,9 @@ struct MainView: View {
             Haptics.select()
             dock.setCompact(false)
         }
-        .task { await steps.start() }
-        .task(id: auth.user?.uid) {
-            if auth.user != nil {
-                leaderboard.startListening()
-                leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
-            } else {
-                leaderboard.stopListening()
-            }
-        }
-        .onChange(of: steps.totalSteps) { _, _ in
-            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
-        }
-        .onChange(of: steps.stepsThisWeek) { _, _ in
-            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
-        }
-        .onChange(of: steps.spentSteps) { _, _ in
-            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
-        }
-        .onChange(of: leaderboard.entries) { _, entries in
-            if let mine = entries.first(where: { $0.id == auth.user?.uid }) {
-                steps.adoptSpentSteps(mine.spentSteps)
-            }
-        }
+        // Step and leaderboard syncing lives in its own invisible view, so
+        // new step counts don't redraw every page.
+        .background(StepSync())
     }
 }
 
@@ -138,7 +117,7 @@ private struct Dock: View {
     /// The page on screen right now (follows a swipe as it happens).
     var showing: AppTab
     @EnvironmentObject private var auth: AuthStore
-    @EnvironmentObject private var dock: DockState
+    @ObservedObject var dock: DockState
     @Namespace private var pill
 
     var body: some View {
@@ -245,6 +224,41 @@ private extension View {
             return abs(frame.minX) < frame.width / 2
         } action: { onScreen in
             if onScreen, showing.wrappedValue != page { showing.wrappedValue = page }
+        }
+    }
+}
+
+/// Keeps steps and the leaderboard in sync: starts step counting, uploads
+/// your totals when they change, and adopts steps spent on other devices.
+private struct StepSync: View {
+    @EnvironmentObject private var auth: AuthStore
+    @EnvironmentObject private var steps: StepStore
+    @EnvironmentObject private var leaderboard: LeaderboardStore
+
+    var body: some View {
+        Color.clear
+        .task { await steps.start() }
+        .task(id: auth.user?.uid) {
+            if auth.user != nil {
+                leaderboard.startListening()
+                leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
+            } else {
+                leaderboard.stopListening()
+            }
+        }
+        .onChange(of: steps.totalSteps) { _, _ in
+            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
+        }
+        .onChange(of: steps.stepsThisWeek) { _, _ in
+            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
+        }
+        .onChange(of: steps.spentSteps) { _, _ in
+            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
+        }
+        .onChange(of: leaderboard.entries) { _, entries in
+            if let mine = entries.first(where: { $0.id == auth.user?.uid }) {
+                steps.adoptSpentSteps(mine.spentSteps)
+            }
         }
     }
 }

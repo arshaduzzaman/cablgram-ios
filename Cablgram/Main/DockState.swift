@@ -13,9 +13,22 @@ final class DockState: ObservableObject {
     }
 }
 
+/// Hands pages the dock without making them redraw when it changes (only
+/// the dock itself watches it).
+private struct DockStateKey: EnvironmentKey {
+    @MainActor static let defaultValue = DockState()
+}
+
+extension EnvironmentValues {
+    var dockState: DockState {
+        get { self[DockStateKey.self] }
+        set { self[DockStateKey.self] = newValue }
+    }
+}
+
 /// Watches a page's scrolling and shrinks or grows the dock to match.
 private struct CollapsesDock: ViewModifier {
-    @EnvironmentObject private var dock: DockState
+    @Environment(\.dockState) private var dock
 
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
