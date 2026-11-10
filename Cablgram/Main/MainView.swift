@@ -23,6 +23,15 @@ enum AppTab: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The dock's own drawn icon for this tab.
+    var dockIcon: DockIcon.Kind {
+        switch self {
+        case .news, .menu: .home
+        case .walk: .walk
+        case .discover: .ticket
+        }
+    }
+
     var selectedIcon: String {
         switch self {
         case .news: "house.fill"
@@ -153,10 +162,9 @@ private struct Dock: View {
                 .padding(2)
                 .overlay(Circle().stroke(selected ? Color.brand : Color.clear, lineWidth: 1.5))
         } else {
-            Image(systemName: selected ? tab.selectedIcon : tab.icon)
-                .font(.system(size: 22, weight: selected ? .semibold : .medium))
-                .foregroundStyle(selected ? Color.brand : Color.black)
-                .symbolEffect(.bounce, value: selected)
+            DockIcon(kind: tab.dockIcon, selected: selected,
+                     color: selected ? Color.brand : .black, size: 26)
+                .scaleEffect(selected ? 1.06 : 1)
         }
     }
 }
@@ -166,16 +174,11 @@ private struct Dock: View {
 private struct GlassDock: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            // Frosted, like Instagram's: a strong blur and a white wash under
-            // the glass, so what scrolls behind turns soft and the icons stay
-            // crisp, with Liquid Glass edges and shine on top.
+            // Liquid Glass with a light white tint, like Instagram's: what
+            // scrolls behind stays visible but softened, so the icons stay
+            // readable.
             content
-                .background {
-                    Capsule()
-                        .fill(.ultraThinMaterial)
-                        .overlay(Capsule().fill(.white.opacity(0.35)))
-                }
-                .glassEffect(.regular.tint(.white.opacity(0.35)).interactive(), in: Capsule())
+                .glassEffect(.regular.tint(.white.opacity(0.18)).interactive(), in: Capsule())
                 .environment(\.colorScheme, .light)
         } else {
             content
