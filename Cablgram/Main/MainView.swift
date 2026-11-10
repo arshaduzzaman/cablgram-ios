@@ -43,19 +43,28 @@ struct MainView: View {
     @State private var tab: AppTab = .news
 
     var body: some View {
-        TabView(selection: $tab) {
-            NewsView(openWalk: {
-                withAnimation(.snappy) { tab = .walk }
-            })
-            .tag(AppTab.news)
-            WalkPage()
-                .tag(AppTab.walk)
-            DiscoverView()
-                .tag(AppTab.discover)
-            MenuView()
-                .tag(AppTab.menu)
+        // The pages run all the way to the bottom of the screen and the dock
+        // floats on top, so the feed scrolls under the glass like Instagram.
+        ZStack(alignment: .bottom) {
+            TabView(selection: $tab) {
+                NewsView(openWalk: {
+                    withAnimation(.snappy) { tab = .walk }
+                })
+                .tag(AppTab.news)
+                WalkPage()
+                    .tag(AppTab.walk)
+                DiscoverView()
+                    .tag(AppTab.discover)
+                MenuView()
+                    .tag(AppTab.menu)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            // Room at the end of every page so the last item clears the dock.
+            .contentMargins(.bottom, 92, for: .scrollContent)
+            .ignoresSafeArea(edges: .bottom)
+
+            Dock(selection: $tab)
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
         .background(Color(.systemBackground))
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
@@ -69,9 +78,6 @@ struct MainView: View {
             .padding(.top, 2)
             .padding(.bottom, 10)
             .background(Color.brand.ignoresSafeArea(edges: .top))
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            Dock(selection: $tab)
         }
         .onChange(of: tab) { _, _ in Haptics.select() }
         .task { await steps.start() }
