@@ -314,6 +314,10 @@ private final class OnScreen {
 }
 
 private struct PostRow: View, Equatable {
+    /// Where the advertisers' banner strip starts, as a fraction of the
+    /// photo's height. Eggs can't land below it.
+    static let bannerTop: CGFloat = 0.94
+
     /// Rows only redraw when what they show changes (the actions are the
     /// same each time, so they're left out).
     static func == (a: PostRow, b: PostRow) -> Bool {
@@ -757,8 +761,10 @@ private struct PostRow: View, Equatable {
         let reach = max(pulled - deadZone, 0) * 2.4
         let x = anchor.x + direction.dx * reach
         let y = anchor.y + direction.dy * reach
+        // Eggs never land on the bottom 6% of the photo, where the news
+        // posts carry their advertisers' banner strip.
         aim.target = CGPoint(x: min(max(x / size.width, 0.04), 0.96),
-                            y: min(max(y / size.height, 0.04), 0.96))
+                            y: min(max(y / size.height, 0.04), Self.bannerTop))
     }
 
     /// Let go to throw from your hand to the target.
