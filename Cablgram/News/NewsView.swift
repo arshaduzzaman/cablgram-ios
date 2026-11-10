@@ -137,52 +137,50 @@ private enum HoldMode: Equatable {
     case aiming
 }
 
-/// A rounded pill in the actions row; tinted pink when it's "on".
-private struct ActionPill<Content: View>: View {
-    let tint: Color?
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        HStack(spacing: 6) { content }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 13)
-            .frame(height: 36)
-            .background((tint?.opacity(0.12) ?? Color(.secondarySystemBackground)), in: Capsule())
-            .contentShape(Capsule())
-    }
-}
-
-/// A count in a pill that rolls when it changes.
-private struct PillCount: View {
+/// A count beside an action icon that rolls when it changes.
+private struct ActionCount: View {
     let value: Int
-    let highlighted: Bool
 
     var body: some View {
         Text(value.formatted(.number.notation(.compactName)))
-            .font(.system(.subheadline, design: .rounded).weight(.semibold).monospacedDigit())
-            .foregroundStyle(highlighted ? Color.brand : .primary)
+            .font(.subheadline.weight(.semibold).monospacedDigit())
+            .foregroundStyle(.primary)
             .contentTransition(.numericText(value: Double(value)))
     }
 }
 
-/// Pills squish a little under your finger.
-private struct PillPress: ButtonStyle {
+/// Icons dip a little under your finger.
+private struct IconPress: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .scaleEffect(configuration.isPressed ? 0.88 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
 
-/// A small drawn egg for the egg pill, to match the hearts and pencils.
-private struct EggGlyph: View {
-    var body: some View {
-        Canvas { context, size in
-            let egg = EggArt.egg(center: CGPoint(x: size.width / 2, y: size.height / 2),
-                                 size: size.height, angle: .zero)
-            context.fill(egg, with: .color(EggArt.shell))
-            context.stroke(egg, with: .color(.primary), lineWidth: 1.8)
+/// A line-style egg with a crack across it, drawn on a 24-point grid to sit
+/// alongside SF Symbols like the heart.
+private struct EggIcon: Shape {
+    func path(in rect: CGRect) -> Path {
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + x / 24 * rect.width, y: rect.minY + y / 24 * rect.height)
         }
+        var path = Path()
+        // Shell: narrower at the top, round at the bottom.
+        path.move(to: p(12, 2.6))
+        path.addCurve(to: p(19.7, 14), control1: p(16.6, 2.6), control2: p(19.7, 9))
+        path.addCurve(to: p(12, 21.4), control1: p(19.7, 18.6), control2: p(16.3, 21.4))
+        path.addCurve(to: p(4.3, 14), control1: p(7.7, 21.4), control2: p(4.3, 18.6))
+        path.addCurve(to: p(12, 2.6), control1: p(4.3, 9), control2: p(7.4, 2.6))
+        path.closeSubpath()
+        // Crack.
+        path.move(to: p(5.1, 11.4))
+        path.addLine(to: p(8.4, 9.6))
+        path.addLine(to: p(10.6, 12.2))
+        path.addLine(to: p(13.2, 9.6))
+        path.addLine(to: p(15.4, 12.2))
+        path.addLine(to: p(18.9, 10.6))
+        return path
     }
 }
 
@@ -504,28 +502,29 @@ private struct PostRow: View {
 
     // MARK: - Counts row
 
-    /// Love, eggs and headline as soft pills, with a quiet hint below.
+    /// Love, eggs and headline as clean line icons with their counts, and a
+    /// quiet hint below.
     private var actions: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 18) {
                 Button {
                     let loving = !loved
                     if loving { Haptics.success() } else { Haptics.tap() }
                     onLove(loving)
                 } label: {
-                    ActionPill(tint: loved ? Color.brand : nil) {
+                    HStack(spacing: 6) {
                         Image(systemName: loved ? "heart.fill" : "heart")
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.system(size: 23, weight: .regular))
                             .foregroundStyle(loved ? Color.brand : .primary)
                             .symbolEffect(.bounce, value: loved)
-                        if !lovers.isEmpty {
-                            PillCount(value: lovers.count, highlighted: loved)
-                        }
+                            .frame(width: 26, height: 26)
+                        if !lovers.isEmpty { ActionCount(value: lovers.count) }
                     }
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(PillPress())
+                .buttonStyle(IconPress())
                 .animation(.snappy, value: lovers.count)
-                .animation(.snappy, value: loved)
                 .accessibilityLabel(loved ? "Unlove" : "Love")
                 .accessibilityValue(lovers.count == 1 ? "1 love" : "\(lovers.count) loves")
 
@@ -533,34 +532,35 @@ private struct PostRow: View {
                     Haptics.tap()
                     show("Hold the photo, pull back and let go to throw")
                 } label: {
-                    ActionPill(tint: nil) {
-                        EggGlyph()
-                            .frame(width: 15, height: 18)
-                        if !eggs.isEmpty {
-                            PillCount(value: eggs.count, highlighted: false)
-                        }
+                    HStack(spacing: 6) {
+                        EggIcon()
+                            .stroke(.primary, style: StrokeStyle(lineWidth: 1.9, lineCap: .round, lineJoin: .round))
+                            .frame(width: 26, height: 26)
+                        if !eggs.isEmpty { ActionCount(value: eggs.count) }
                     }
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(PillPress())
+                .buttonStyle(IconPress())
                 .animation(.snappy, value: eggs.count)
                 .accessibilityLabel(eggs.count == 1 ? "1 egg thrown" : "\(eggs.count) eggs thrown")
                 .accessibilityHint("Hold the photo to throw an egg")
-
-                Spacer(minLength: 0)
 
                 Button {
                     Haptics.tap()
                     showHeadlines = true
                 } label: {
-                    ActionPill(tint: nil) {
-                        Image(systemName: "pencil.line")
-                            .font(.system(size: 15, weight: .semibold))
-                        Text("Headline")
-                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                    }
+                    Image(systemName: "pencil.line")
+                        .font(.system(size: 21, weight: .regular))
+                        .foregroundStyle(.primary)
+                        .frame(width: 26, height: 26)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(PillPress())
+                .buttonStyle(IconPress())
                 .accessibilityLabel("Write a headline")
+
+                Spacer(minLength: 0)
             }
 
             if !hint.isEmpty {
@@ -569,7 +569,6 @@ private struct PostRow: View {
                     .foregroundStyle(notice == nil && mode == .idle ? .tertiary : .secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
-                    .padding(.leading, 4)
                     .transition(.opacity)
             }
         }
