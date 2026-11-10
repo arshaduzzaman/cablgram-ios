@@ -33,8 +33,9 @@ enum AppTab: String, CaseIterable, Identifiable {
     }
 }
 
-/// Facebook-style shell: a hot-pink bar with the white "cablgram" wordmark
-/// and the tab icons, and the selected page below.
+/// The shell: a hot-pink bar with the white "cablgram" wordmark on top, the
+/// pages side by side (swipe left and right to move between them, like
+/// Instagram), and a floating, rounded pink dock at the bottom.
 struct MainView: View {
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var steps: StepStore
@@ -42,37 +43,37 @@ struct MainView: View {
     @State private var tab: AppTab = .news
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 0) {
-                TopBar(onProfile: {
-                    Haptics.tap()
-                    tab = .menu
-                })
-                TabStrip(selection: $tab)
-            }
-            .background(Color.brand.ignoresSafeArea(edges: .top))
-            .environment(\.colorScheme, .dark)
-
-            // All pages stay alive so switching tabs keeps scroll position and map state.
-            ZStack {
-                NewsView(openWalk: {
-                    Haptics.select()
-                    tab = .walk
-                })
-                    .opacity(tab == .news ? 1 : 0)
-                    .allowsHitTesting(tab == .news)
-                WalkPage()
-                    .opacity(tab == .walk ? 1 : 0)
-                    .allowsHitTesting(tab == .walk)
-                DiscoverView()
-                    .opacity(tab == .discover ? 1 : 0)
-                    .allowsHitTesting(tab == .discover)
-                MenuView()
-                    .opacity(tab == .menu ? 1 : 0)
-                    .allowsHitTesting(tab == .menu)
-            }
+        TabView(selection: $tab) {
+            NewsView(openWalk: {
+                withAnimation(.snappy) { tab = .walk }
+            })
+            .tag(AppTab.news)
+            WalkPage()
+                .tag(AppTab.walk)
+            DiscoverView()
+                .tag(AppTab.discover)
+            MenuView()
+                .tag(AppTab.menu)
         }
+        .tabViewStyle(.page(indexDisplayMode: .never))
         .background(Color(.systemBackground))
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack {
+                Text("cablgram")
+                    .font(.wordmark(28))
+                    .tracking(-0.8)
+                    .foregroundStyle(.white)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 2)
+            .padding(.bottom, 10)
+            .background(Color.brand.ignoresSafeArea(edges: .top))
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Dock(selection: $tab)
+        }
+        .onChange(of: tab) { _, _ in Haptics.select() }
         .task { await steps.start() }
         .task(id: auth.user?.uid) {
             if auth.user != nil {
@@ -99,67 +100,76 @@ struct MainView: View {
     }
 }
 
-/// "cablgram" in white Helvetica on the left, profile photo on the right.
-private struct TopBar: View {
-    @EnvironmentObject private var auth: AuthStore
-    let onProfile: () -> Void
-
-    var body: some View {
-        HStack {
-            Text("cablgram")
-                .font(.wordmark(28))
-                .tracking(-0.8)
-                .foregroundStyle(.white)
-            Spacer()
-            Button(action: onProfile) {
-                Avatar(url: auth.user?.photoURL, name: auth.displayName, size: 32)
-                    .overlay(Circle().stroke(.white, lineWidth: 1.5))
-            }
-            .accessibilityLabel("Your profile")
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 2)
-        .padding(.bottom, 4)
-    }
-}
-
-/// Tab icons in white with a thin sliding underline, like Facebook's.
-private struct TabStrip: View {
+/// The floating tab dock: a rounded bar of glass (Liquid Glass on iOS 26+,
+/// frosted blur before that) with a solid pink pill sliding behind the
+/// selected tab, and your profile photo as the last tab.
+private struct Dock: View {
     @Binding var selection: AppTab
-    @Namespace private var underline
+    @EnvironmentObject private var auth: AuthStore
+    @Namespace private var pill
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             ForEach(AppTab.allCases) { tab in
                 let isSelected = tab == selection
                 Button {
-                    if selection != tab { Haptics.select() }
-                    withAnimation(.snappy(duration: 0.25)) { selection = tab }
+                    guard selection != tab else { return }
+                    withAnimation(.snappy(duration: 0.3)) { selection = tab }
                 } label: {
-                    VStack(spacing: 7) {
-                        Image(systemName: isSelected ? tab.selectedIcon : tab.icon)
-                            .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
-                            .foregroundStyle(.white.opacity(isSelected ? 1 : 0.65))
-                            .frame(height: 24)
-                        ZStack {
-                            Rectangle().fill(.clear).frame(height: 2)
-                            if isSelected {
-                                Rectangle()
-                                    .fill(.white)
-                                    .frame(height: 2)
-                                    .matchedGeometryEffect(id: "underline", in: underline)
-                            }
+                    ZStack {
+                        if isSelected {
+                            Capsule()
+                                .fill(Color.brand)
+                                .shadow(color: Color.brand.opacity(0.4), radius: 8, y: 3)
+                                .matchedGeometryEffect(id: "pill", in: pill)
                         }
+                        icon(for: tab, selected: isSelected)
                     }
                     .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
+                    .frame(height: 50)
+                    .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(tab.title)
+                .accessibilityLabel(tab == .menu ? "Your profile" : tab.title)
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
-        .padding(.top, 4)
+        .padding(6)
+        .modifier(GlassDock())
+        .padding(.horizontal, 28)
+        .padding(.bottom, 2)
+        .animation(.snappy(duration: 0.3), value: selection)
+    }
+
+    @ViewBuilder
+    private func icon(for tab: AppTab, selected: Bool) -> some View {
+        if tab == .menu {
+            Avatar(url: auth.user?.photoURL, name: auth.displayName, size: 28)
+                .overlay(Circle().stroke(selected ? .white : Color.clear, lineWidth: 2))
+                .padding(2)
+        } else {
+            Image(systemName: selected ? tab.selectedIcon : tab.icon)
+                .font(.system(size: 21, weight: selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Color.white : Color.primary.opacity(0.75))
+                .symbolEffect(.bounce, value: selected)
+        }
+    }
+}
+
+/// The dock's glass: Apple's Liquid Glass where available, otherwise a
+/// frosted material with a thin light edge and a soft shadow.
+private struct GlassDock: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(.regular.interactive(), in: Capsule())
+                .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+        } else {
+            content
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.6), lineWidth: 0.75))
+                .shadow(color: .black.opacity(0.15), radius: 16, y: 6)
+        }
     }
 }
 

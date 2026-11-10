@@ -5,6 +5,7 @@ import FirebaseFirestore
 /// Eggs and step-bought headlines on posts, shared through Firestore so
 /// everyone sees them live:
 ///
+///     newsPosts/{postId}/loves/{uid}     { uid, at }
 ///     newsPosts/{postId}/eggs/{id}       { uid, x, y, at }
 ///     newsPosts/{postId}/headlines/{id}  { uid, author, text, steps, at }
 ///
@@ -13,6 +14,8 @@ import FirebaseFirestore
 @MainActor
 final class NewsSocial: ObservableObject {
     @Published private(set) var eggs: [String: [EggMark]] = [:]
+    /// Who loved each post (user ids).
+    @Published private(set) var loves: [String: Set<String>] = [:]
     /// Headlines people paid steps for, most steps first.
     @Published private(set) var headlines: [String: [Headline]] = [:]
     /// Set when saving something fails, so the feed can say so.
@@ -29,6 +32,11 @@ final class NewsSocial: ObservableObject {
     }
 
     func eggs(_ postID: String) -> [EggMark] { eggs[postID] ?? [] }
+    func loves(_ postID: String) -> Set<String> { loves[postID] ?? [] }
+
+    /// How this phone's love is recorded: your user id, or a stand-in
+    /// when not signed in.
+    var myKey: String { uid ?? "this-phone" }
     func headlines(_ postID: String) -> [Headline] { headlines[postID] ?? [] }
 
     // MARK: - Listening
@@ -88,11 +96,33 @@ final class NewsSocial: ObservableObject {
                     Task { @MainActor in self?.headlines[id] = headlines }
                 }
 
-            listeners[id] = [eggs, headlines]
+            let loves = doc.collection("loves")
+                .limit(to: 2000)
+                .addSnapshotListener { [weak self] snapshot, _ in
+                    guard let documents = snapshot?.documents else { return }
+                    let lovers = Set(documents.map(\.documentID))
+                    Task { @MainActor in self?.loves[id] = lovers }
+                }
+
+            listeners[id] = [eggs, headlines, loves]
         }
     }
 
     // MARK: - Writing
+
+    /// Loves (or unloves) a post. One love per person.
+    func setLove(_ on: Bool, on postID: String) {
+        guard let uid else {
+            if on { loves[postID, default: []].insert(myKey) } else { loves[postID]?.remove(myKey) }
+            return
+        }
+        let doc = post(postID).collection("loves").document(uid)
+        if on {
+            doc.setData(["uid": uid, "at": FieldValue.serverTimestamp()], completion: report("love"))
+        } else {
+            doc.delete(completion: report("love"))
+        }
+    }
 
     /// Throws an egg at `point` (fractions of the photo). Returns its id so
     /// the thrower's phone can animate the throw.

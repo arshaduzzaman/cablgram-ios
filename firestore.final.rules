@@ -31,9 +31,20 @@ service cloud.firestore {
                     || request.resource.data.spentSteps >= resource.data.spentSteps)));
     }
 
-    // News feed: shared eggs and step-bought headlines on each post.
+    // News feed: shared loves, eggs and step-bought headlines on each post.
     match /newsPosts/{postId} {
       allow read: if request.auth != null;
+
+      // A love: one per person (the document id is their user id).
+      match /loves/{userId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null
+          && userId == request.auth.uid
+          && request.resource.data.keys().hasOnly(['uid', 'at'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.at == request.time;
+        allow delete: if request.auth != null && userId == request.auth.uid;
+      }
 
       // A rotten egg someone threw at the photo (it costs them steps).
       match /eggs/{eggId} {

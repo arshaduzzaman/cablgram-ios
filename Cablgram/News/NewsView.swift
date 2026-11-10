@@ -32,6 +32,11 @@ struct NewsView: View {
                             eggs: social.eggs(post.id),
                             headlines: social.headlines(post.id),
                             myID: auth.user?.uid,
+                            lovers: social.loves(post.id),
+                            myLoveKey: social.myKey,
+                            onLove: { on in social.setLove(on, on: post.id) },
+                            myName: auth.displayName,
+                            myPhotoURL: auth.user?.photoURL,
                             availableSteps: steps.availableSteps,
                             spend: { amount in steps.spend(amount) },
                             onThrowEgg: { spot in social.throwEgg(at: spot, on: post.id) },
@@ -137,6 +142,13 @@ private enum HoldMode: Equatable {
 
 private enum HoldChoice { case egg, headline }
 
+/// One double-tap heart: where it pops, tilted a little each time.
+private struct LoveBurst: Equatable {
+    let id = UUID()
+    let point: CGPoint
+    let tilt = Double.random(in: -14...14)
+}
+
 /// One post: Cablgram's avatar on the left, then name, time, the headline
 /// people paid steps for, the photo (with everyone's eggs on it), and a
 /// slim counts row.
@@ -145,6 +157,12 @@ private struct PostRow: View {
     let eggs: [EggMark]
     let headlines: [Headline]
     let myID: String?
+    /// Everyone who loved this post (user ids), and how to love or unlove it.
+    let lovers: Set<String>
+    let myLoveKey: String
+    let onLove: (Bool) -> Void
+    let myName: String
+    let myPhotoURL: URL?
     let availableSteps: Int
     /// Spends steps; returns whether there were enough.
     let spend: (Int) -> Bool
@@ -169,6 +187,12 @@ private struct PostRow: View {
     @State private var thrownHere: Set<String> = []
     /// When everyone else's splats start popping in after your first egg.
     @State private var revealStart: Date?
+    /// Your splats outlined right now (after you tap one).
+    @State private var highlighted: Set<String> = []
+    /// Splats hidden with a tap, to see the photo clearly.
+    @State private var splatsHidden = false
+    /// The heart that pops where you double-tapped.
+    @State private var loveBurst: LoveBurst?
     @State private var eggScale = EggScale.steady(1)
     /// Keeps the egg animation running until this time.
     @State private var animateUntil = Date.distantPast
@@ -260,15 +284,20 @@ private struct PostRow: View {
                     .scaledToFit()
                     .overlay {
                         EggLayer(eggs: eggs, landing: landing, mine: myEggs, revealed: revealed,
-                                 revealStart: revealStart, scale: eggScale,
+                                 revealStart: revealStart, scale: eggScale, highlighted: highlighted,
                                  animating: !landing.isEmpty || animateUntil > .now)
+                            .opacity(splatsHidden ? 0 : 1)
                     }
                     .overlay {
                         PhotoTouchLayer(onHoldBegan: holdBegan,
                                         onHoldMoved: holdMoved,
-                                        onHoldEnded: holdEnded)
+                                        onHoldEnded: holdEnded,
+                                        onTaps: taps)
                     }
+                    .overlay { myMarkers.opacity(splatsHidden ? 0 : 1).allowsHitTesting(!splatsHidden) }
+                    .overlay { loveBurstView }
                     .overlay { holdOverlay }
+                    .animation(.easeInOut(duration: 0.25), value: splatsHidden)
             } else {
                 ZStack {
                     Color(.secondarySystemBackground)
@@ -364,6 +393,31 @@ private struct PostRow: View {
 
     private var actions: some View {
         HStack(spacing: 16) {
+            Button {
+                let loving = !loved
+                if loving { Haptics.success() } else { Haptics.tap() }
+                onLove(loving)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: loved ? "heart.fill" : "heart")
+                        .font(.system(size: 19))
+                        .foregroundStyle(loved ? Color.brand : .primary)
+                        .symbolEffect(.bounce, value: loved)
+                    if !lovers.isEmpty {
+                        Text(lovers.count.formatted())
+                            .font(.subheadline.weight(.medium).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.numericText(value: Double(lovers.count)))
+                    }
+                }
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+                .animation(.snappy, value: lovers.count)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(loved ? "Unlove" : "Love")
+            .accessibilityValue(lovers.count == 1 ? "1 love" : "\(lovers.count) loves")
+
             if !eggs.isEmpty {
                 HStack(spacing: 3) {
                     Text("🥚")
@@ -396,14 +450,105 @@ private struct PostRow: View {
         case .eggReady: return "Let go to throw · \(EggPrice.steps) steps"
         case .headlineReady: return "Let go to write a headline"
         case .idle:
+            if splatsHidden { return "Eggs hidden · tap the photo to show" }
             if !revealed && !eggs.isEmpty {
                 return eggs.count == 1 ? "1 egg hidden · throw one to see it" : "\(eggs.count) eggs hidden · throw one to see them"
             }
-            return eggs.isEmpty && headlines.isEmpty ? "Hold the photo" : ""
+            return eggs.isEmpty && headlines.isEmpty ? "Double-tap to love · triple-tap to egg" : ""
         }
     }
 
+    // MARK: - Taps and love
+
+    private var loved: Bool { lovers.contains(myLoveKey) }
+
+    /// One tap hides or shows the eggs, two love the post, three throw an
+    /// egg right where you tapped.
+    private func taps(_ count: Int, at point: CGPoint, in size: CGSize) {
+        guard mode == .idle, size.width > 0, size.height > 0 else { return }
+        let spot = CGPoint(x: point.x / size.width, y: point.y / size.height)
+        switch count {
+        case 3:
+            throwEgg(at: spot)
+        case 2:
+            Haptics.success()
+            if !loved { onLove(true) }
+            let burst = LoveBurst(point: spot)
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) { loveBurst = burst }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(750))
+                if loveBurst?.id == burst.id {
+                    withAnimation(.easeOut(duration: 0.25)) { loveBurst = nil }
+                }
+            }
+        default:
+            // Only worth hiding once there are splats you can see.
+            guard revealed, !eggs.isEmpty else { return }
+            Haptics.soft()
+            splatsHidden.toggle()
+        }
+    }
+
+    /// The big heart that pops where you double-tapped.
+    private var loveBurstView: some View {
+        GeometryReader { geo in
+            if let loveBurst {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 92))
+                    .foregroundStyle(Color.brand)
+                    .shadow(color: .black.opacity(0.3), radius: 10, y: 4)
+                    .rotationEffect(.degrees(loveBurst.tilt))
+                    .position(x: loveBurst.point.x * geo.size.width, y: loveBurst.point.y * geo.size.height)
+                    .transition(.scale(scale: 0.2).combined(with: .opacity))
+                    .id(loveBurst.id)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
     // MARK: - Eggs
+
+    /// Your profile picture pinned beside each of your splats. Tapping your
+    /// splat (or the picture) outlines it in pink for a moment.
+    private var myMarkers: some View {
+        GeometryReader { geo in
+            let radius = EggArt.size * geo.size.width * eggScale.to
+            ForEach(eggs.filter { myEggs.contains($0.id) && landing[$0.id] == nil }) { egg in
+                let center = CGPoint(x: egg.x * geo.size.width, y: egg.y * geo.size.height)
+                Button {
+                    highlight(egg.id)
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Circle()
+                            .fill(.clear)
+                            .frame(width: radius * 2, height: radius * 2)
+                            .contentShape(Circle())
+                        Avatar(url: myPhotoURL, name: myName, size: 24)
+                            .overlay(Circle().stroke(.white, lineWidth: 2))
+                            .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+                            .offset(x: 10, y: -10)
+                            .scaleEffect(highlighted.contains(egg.id) ? 1.2 : 1)
+                    }
+                }
+                .buttonStyle(.plain)
+                .position(center)
+                .transition(.scale.combined(with: .opacity))
+                .accessibilityLabel("Your egg")
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.6), value: highlighted)
+        .animation(.spring(response: 0.35, dampingFraction: 0.6), value: landing.keys.sorted())
+    }
+
+    private func highlight(_ id: String) {
+        Haptics.select()
+        highlighted.insert(id)
+        keepAnimating(until: .now.addingTimeInterval(0.1))
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2.5))
+            highlighted.remove(id)
+        }
+    }
 
     /// Eggs you threw: from this session, or saved under your account.
     private var myEggs: Set<String> {
@@ -469,6 +614,7 @@ private struct PostRow: View {
             return
         }
         let firstHere = !revealed
+        splatsHidden = false
         let id = onThrowEgg(spot)
         thrownHere.insert(id)
         knownEggs?.insert(id)
@@ -727,6 +873,8 @@ private struct PhotoTouchLayer: UIViewRepresentable {
     var onHoldBegan: (CGPoint, CGSize) -> Void
     var onHoldMoved: (CGPoint, CGSize) -> Void
     var onHoldEnded: () -> Void
+    /// Taps on the photo: 1 hides or shows eggs, 2 loves, 3 throws an egg.
+    var onTaps: (Int, CGPoint, CGSize) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -741,6 +889,20 @@ private struct PhotoTouchLayer: UIViewRepresentable {
         hold.allowableMovement = 8
         hold.delegate = c
         view.addGestureRecognizer(hold)
+
+        // Each tap count waits for the next one to fail, so a triple-tap
+        // isn't also read as a double and a single.
+        let triple = UITapGestureRecognizer(target: c, action: #selector(Coordinator.handleTap(_:)))
+        triple.numberOfTapsRequired = 3
+        let double = UITapGestureRecognizer(target: c, action: #selector(Coordinator.handleTap(_:)))
+        double.numberOfTapsRequired = 2
+        double.require(toFail: triple)
+        let single = UITapGestureRecognizer(target: c, action: #selector(Coordinator.handleTap(_:)))
+        single.require(toFail: double)
+        for tap in [triple, double, single] {
+            tap.delegate = c
+            view.addGestureRecognizer(tap)
+        }
         return view
     }
 
@@ -751,7 +913,11 @@ private struct PhotoTouchLayer: UIViewRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: PhotoTouchLayer?
         weak var view: UIView?
-        private weak var lockedScroll: UIScrollView?
+
+        @objc func handleTap(_ g: UITapGestureRecognizer) {
+            guard let view else { return }
+            parent?.onTaps(g.numberOfTapsRequired, g.location(in: view), view.bounds.size)
+        }
 
         @objc func handleHold(_ g: UILongPressGestureRecognizer) {
             guard let view, let parent else { return }
@@ -770,19 +936,24 @@ private struct PhotoTouchLayer: UIViewRepresentable {
             }
         }
 
-        /// Pauses the feed's scrolling while holding (and cancels a scroll
-        /// that may have started), then gives it back.
-        private func setScrollLocked(_ locked: Bool) {
-            if locked {
-                guard lockedScroll == nil else { return }
+        /// Pauses scrolling while holding: the feed, and the swipe between
+        /// tabs, so sliding to a bubble never scrolls or changes tab.
+        private var locked: [UIScrollView] = []
+
+        private func setScrollLocked(_ lock: Bool) {
+            if lock {
+                guard locked.isEmpty else { return }
                 var ancestor = view?.superview
-                while let current = ancestor, !(current is UIScrollView) { ancestor = current.superview }
-                guard let scroll = ancestor as? UIScrollView else { return }
-                scroll.panGestureRecognizer.isEnabled = false
-                lockedScroll = scroll
-            } else if let scroll = lockedScroll {
-                scroll.panGestureRecognizer.isEnabled = true
-                lockedScroll = nil
+                while let current = ancestor {
+                    if let scroll = current as? UIScrollView, scroll.panGestureRecognizer.isEnabled {
+                        scroll.panGestureRecognizer.isEnabled = false
+                        locked.append(scroll)
+                    }
+                    ancestor = current.superview
+                }
+            } else {
+                locked.forEach { $0.panGestureRecognizer.isEnabled = true }
+                locked = []
             }
         }
 

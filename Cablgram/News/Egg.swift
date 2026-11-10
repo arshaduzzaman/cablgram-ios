@@ -70,7 +70,7 @@ enum EggArt {
             drip.closeSubpath()
             context.drawLayer { layer in
                 layer.addFilter(.shadow(color: .black.opacity(0.2), radius: 1.5, y: 1))
-                layer.fill(drip, with: .color(white.opacity(0.95)))
+                layer.fill(drip, with: .color(white))
             }
         }
 
@@ -78,7 +78,7 @@ enum EggArt {
         let whitePath = blob(center: center, radius: r * spread, rand: rand, salt: 10, wobble: 0.22)
         context.drawLayer { layer in
             layer.addFilter(.shadow(color: .black.opacity(0.25), radius: 2, y: 1))
-            layer.fill(whitePath, with: .color(white.opacity(0.96)))
+            layer.fill(whitePath, with: .color(white))
         }
         context.stroke(whitePath, with: .color(.white), lineWidth: 1.2)
         // Shine on the egg white.
@@ -132,6 +132,11 @@ enum EggArt {
             context.fill(placed, with: .color(shell.opacity(fade)))
             context.stroke(placed, with: .color(Color(white: 0.55).opacity(0.8 * fade)), lineWidth: 0.8)
         }
+    }
+
+    /// The outer edge of a settled splat's egg white, for outlining it.
+    static func outline(_ seed: String, at center: CGPoint, radius r: CGFloat) -> Path {
+        blob(center: center, radius: r, rand: Rand(seed), salt: 10, wobble: 0.22)
     }
 
     /// A whole egg, for the throw.
@@ -227,7 +232,8 @@ struct EggScale: Equatable {
 
 /// Splats on the photo, with any eggs that are mid-flight or landing
 /// animated. Other people's splats stay hidden until you've thrown one;
-/// then they pop in one after another. Draws in the photo's coordinates.
+/// then they pop in one after another. Yours are drawn on top, and get a
+/// pink outline while highlighted. Draws in the photo's coordinates.
 struct EggLayer: View {
     let eggs: [EggMark]
     let landing: [String: EggLanding]
@@ -238,6 +244,8 @@ struct EggLayer: View {
     /// When the others start popping in (nil: they're just there).
     let revealStart: Date?
     let scale: EggScale
+    /// Your splats to outline in pink right now.
+    let highlighted: Set<String>
     let animating: Bool
 
     /// Gap between each splat popping in, kept under a second in total.
@@ -251,40 +259,55 @@ struct EggLayer: View {
             Canvas { context, size in
                 let now = timeline.date
                 let radius = EggArt.size * size.width * scale.value(at: now)
+
+                // Everyone else's first, then yours on top.
                 var order = 0
-                for egg in eggs {
-                    let center = CGPoint(x: egg.x * size.width, y: egg.y * size.height)
-                    let isMine = mine.contains(egg.id)
-                    if !isMine && !revealed { continue }
-
-                    if let anim = landing[egg.id] {
-                        let t = now.timeIntervalSince(anim.start)
-                        let impact = anim.impactTime()
-                        if t < impact {
-                            flying(t / impact, to: center, size: size, radius: radius, in: &context)
-                        } else {
-                            EggArt.draw(egg.id, at: center, radius: radius,
-                                        progress: Self.progress(after: t - impact), in: &context)
-                        }
-                        continue
+                if revealed {
+                    for egg in eggs where !mine.contains(egg.id) {
+                        drawEgg(egg, order: &order, now: now, size: size, radius: radius, in: &context)
                     }
-
-                    if !isMine, let revealStart {
-                        let appear = revealStart.addingTimeInterval(Double(order) * stagger)
-                        order += 1
-                        let t = now.timeIntervalSince(appear)
-                        if t < 0 { continue }
-                        if t < 2.5 {
-                            EggArt.draw(egg.id, at: center, radius: radius,
-                                        progress: Self.progress(after: t), in: &context)
-                            continue
-                        }
+                }
+                var none = 0
+                for egg in eggs where mine.contains(egg.id) {
+                    drawEgg(egg, order: &none, now: now, size: size, radius: radius, in: &context)
+                    if highlighted.contains(egg.id), landing[egg.id] == nil {
+                        let center = CGPoint(x: egg.x * size.width, y: egg.y * size.height)
+                        let outline = EggArt.outline(egg.id, at: center, radius: radius * 1.08)
+                        context.stroke(outline, with: .color(.white), lineWidth: 5)
+                        context.stroke(outline, with: .color(.brand), lineWidth: 3)
                     }
-                    EggArt.draw(egg.id, at: center, radius: radius, progress: .final, in: &context)
                 }
             }
         }
         .allowsHitTesting(false)
+    }
+
+    /// One egg: flying, landing, popping in after the reveal, or settled.
+    private func drawEgg(_ egg: EggMark, order: inout Int, now: Date, size: CGSize, radius: CGFloat,
+                         in context: inout GraphicsContext) {
+        let center = CGPoint(x: egg.x * size.width, y: egg.y * size.height)
+        if let anim = landing[egg.id] {
+            let t = now.timeIntervalSince(anim.start)
+            let impact = anim.impactTime()
+            if t < impact {
+                flying(t / impact, to: center, size: size, radius: radius, in: &context)
+            } else {
+                EggArt.draw(egg.id, at: center, radius: radius,
+                            progress: Self.progress(after: t - impact), in: &context)
+            }
+            return
+        }
+        if !mine.contains(egg.id), let revealStart {
+            let appear = revealStart.addingTimeInterval(Double(order) * stagger)
+            order += 1
+            let t = now.timeIntervalSince(appear)
+            if t < 0 { return }
+            if t < 2.5 {
+                EggArt.draw(egg.id, at: center, radius: radius, progress: Self.progress(after: t), in: &context)
+                return
+            }
+        }
+        EggArt.draw(egg.id, at: center, radius: radius, progress: .final, in: &context)
     }
 
     /// The egg flying in from below the photo, spinning and shrinking as it
