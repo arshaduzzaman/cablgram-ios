@@ -253,11 +253,15 @@ struct EggLayer: View {
     let highlighted: Set<String>
     let animating: Bool
 
-    /// Gap between each splat popping in, kept under a second in total.
-    private var stagger: TimeInterval {
-        let others = eggs.count - mine.count
-        return others > 1 ? min(0.06, 0.8 / Double(others)) : 0
+    /// Gap between each splat fading in, kept under a second in total.
+    private var stagger: TimeInterval { Self.stagger(for: eggs.count) }
+
+    static func stagger(for count: Int) -> TimeInterval {
+        count > 1 ? min(0.08, 0.9 / Double(count)) : 0
     }
+
+    /// How long one splat takes to fade in on the reveal.
+    static let fadeIn: TimeInterval = 0.6
 
     var body: some View {
         TimelineView(.animation(paused: !animating)) { timeline in
@@ -272,9 +276,8 @@ struct EggLayer: View {
                         drawEgg(egg, order: &order, now: now, size: size, radius: radius, in: &context)
                     }
                 }
-                var none = 0
                 for egg in eggs where mine.contains(egg.id) {
-                    drawEgg(egg, order: &none, now: now, size: size, radius: radius, in: &context)
+                    drawEgg(egg, order: &order, now: now, size: size, radius: radius, in: &context)
                     if highlighted.contains(egg.id), landing[egg.id] == nil {
                         let center = CGPoint(x: egg.x * size.width, y: egg.y * size.height)
                         let outline = EggArt.outline(egg.id, at: center, radius: radius * 1.08)
@@ -302,13 +305,18 @@ struct EggLayer: View {
             }
             return
         }
-        if !mine.contains(egg.id), let revealStart {
+        if let revealStart {
+            // On the reveal each splat fades and grows in gently, one after
+            // another, rather than splatting.
             let appear = revealStart.addingTimeInterval(Double(order) * stagger)
             order += 1
             let t = now.timeIntervalSince(appear)
             if t < 0 { return }
-            if t < 2.5 {
-                EggArt.draw(egg.id, at: center, radius: radius, progress: Self.progress(after: t), in: &context)
+            if t < Self.fadeIn {
+                let f = EggArt.easeOut(t / Self.fadeIn)
+                var faded = context
+                faded.opacity = f
+                EggArt.draw(egg.id, at: center, radius: radius * (0.75 + 0.25 * f), progress: .final, in: &faded)
                 return
             }
         }

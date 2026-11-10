@@ -699,19 +699,20 @@ private struct PostRow: View {
         }
     }
 
-    /// Your first egg on a post: once it lands, everyone else's splats pop
-    /// in, then they all shrink together, like zooming out on the wall.
+    /// Your first egg on a post: once it lands, everyone else's splats fade
+    /// in one by one, then they all shrink together, like zooming out on the wall.
     private func reveal() {
         let others = eggs.count
-        let start = Date.now.addingTimeInterval(EggLanding.flight + 0.3)
+        // Begin just after your egg hits.
+        let start = Date.now.addingTimeInterval(0.45)
         revealStart = start
-        let popIn = min(0.8, Double(others) * 0.06) + 0.35
+        let popIn = Double(others) * EggLayer.stagger(for: others) + EggLayer.fadeIn
         eggScale = EggScale(from: 1, to: EggScale.target(for: others + 1),
                             start: start.addingTimeInterval(popIn), duration: 1.1)
         keepAnimating(until: eggScale.end.addingTimeInterval(2.5))
         if others > 0 {
             Task { @MainActor in
-                try? await Task.sleep(for: .seconds(EggLanding.flight + 0.3))
+                try? await Task.sleep(for: .seconds(0.45))
                 Haptics.soft()
             }
         }
