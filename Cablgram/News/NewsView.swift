@@ -185,17 +185,6 @@ private struct EggIcon: Shape {
     }
 }
 
-/// Everything above the advertisers' banner strip: splats, their flight and
-/// your markers are cut off at its top edge, so nothing ever covers it.
-private struct AboveBanner: View {
-    var body: some View {
-        GeometryReader { geo in
-            Rectangle()
-                .frame(width: geo.size.width, height: geo.size.height * PostRow.bannerTop(in: geo.size))
-        }
-    }
-}
-
 /// Where the hold started, where the egg will land and where your finger
 /// is, as fractions of the photo.
 private final class AimState: ObservableObject {
@@ -330,7 +319,6 @@ private struct PostRow: View, Equatable {
     static let bannerHeight: CGFloat = 0.07
 
     /// Where the banner strip starts, as a fraction of the photo's height.
-    /// Eggs can't land or show below it.
     static func bannerTop(in size: CGSize) -> CGFloat {
         guard size.height > 0 else { return 1 }
         return max(0.5, 1 - size.width * bannerHeight / size.height)
@@ -483,7 +471,6 @@ private struct PostRow: View, Equatable {
                             // Only redraw the splats when something about them changed.
                             .equatable()
                             .opacity(splatsHidden ? 0 : 1)
-                            .mask { AboveBanner() }
                     }
                     .overlay {
                         PhotoTouchLayer(onHoldBegan: holdBegan,
@@ -493,7 +480,6 @@ private struct PostRow: View, Equatable {
                     }
                     .overlay {
                         myMarkers.opacity(splatsHidden ? 0 : 1).allowsHitTesting(!splatsHidden)
-                            .mask { AboveBanner() }
                     }
                     .overlay { loveBurstView }
                     .overlay { holdOverlay }
@@ -756,8 +742,8 @@ private struct PostRow: View, Equatable {
     /// anchor. Let go without pulling and it lands right there.
     private func holdBegan(at point: CGPoint, in size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
-        // Pressing on the banner strip puts the egg just above it.
-        aim.anchor = CGPoint(x: point.x / size.width, y: min(point.y / size.height, Self.bannerTop(in: size) - 0.03))
+        // Pressing low on the photo puts the egg in the throwable area.
+        aim.anchor = CGPoint(x: point.x / size.width, y: min(point.y / size.height, landingLimit(in: size)))
         aim(at: point, in: size)
         Haptics.press()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) { mode = .aiming }
@@ -784,10 +770,18 @@ private struct PostRow: View, Equatable {
         let reach = max(pulled - deadZone, 0) * 2.4
         let x = anchor.x + direction.dx * reach
         let y = anchor.y + direction.dy * reach
-        // Eggs never land on the bottom 6% of the photo, where the news
-        // posts carry their advertisers' banner strip.
+        // Eggs land well clear of the advertisers' banner strip.
         aim.target = CGPoint(x: min(max(x / size.width, 0.04), 0.96),
-                            y: min(max(y / size.height, 0.04), Self.bannerTop(in: size)))
+                            y: min(max(y / size.height, 0.04), landingLimit(in: size)))
+    }
+
+    /// The lowest an egg can land (fraction of the photo's height): far
+    /// enough above the banner strip that the whole splat, drips and flying
+    /// droplets included, never reaches it.
+    private func landingLimit(in size: CGSize) -> CGFloat {
+        guard size.height > 0 else { return 0.5 }
+        let radius = EggArt.size * size.width * eggScale.to
+        return max(0.2, Self.bannerTop(in: size) - radius * 3.1 / size.height)
     }
 
     /// Let go to throw from your hand to the target.
