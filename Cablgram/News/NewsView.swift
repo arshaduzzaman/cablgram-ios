@@ -591,8 +591,8 @@ private struct PostRow: View {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) { mode = .aiming }
     }
 
-    /// Drag to aim: the direction from the anchor to your finger sets the
-    /// angle, and dragging further throws further.
+    /// Drag to aim, like 8 Ball Pool: pull back from the anchor and the egg
+    /// flies the opposite way; the further you pull, the further it goes.
     private func holdMoved(to point: CGPoint, in size: CGSize) {
         guard mode == .aiming else { return }
         aim(at: point, in: size)
@@ -605,7 +605,9 @@ private struct PostRow: View {
         let dx = point.x - anchor.x, dy = point.y - anchor.y
         let pulled = hypot(dx, dy)
         // Until you drag a little, aim straight up.
-        let direction = pulled < 14 ? CGVector(dx: 0, dy: -1) : CGVector(dx: dx / pulled, dy: dy / pulled)
+        // Pull back to shoot, like a cue: the egg goes the opposite way to
+        // your drag, and pulling further throws further.
+        let direction = pulled < 14 ? CGVector(dx: 0, dy: -1) : CGVector(dx: -dx / pulled, dy: -dy / pulled)
         let reach = 110 + max(pulled - 14, 0) * 1.6
         let x = anchor.x + direction.dx * reach
         let y = anchor.y + direction.dy * reach
