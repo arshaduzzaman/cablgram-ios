@@ -11,6 +11,7 @@ struct WalkPage: View {
 
     @State private var showingLeaderboard = false
     @State private var showingGoalPicker = false
+    @StateObject private var chat = RaceChatStore()
     @State private var justClaimed: Reward?
     /// Set just after the first step count arrives, so opening the app
     /// doesn't buzz for rewards or goals that were already reached.
@@ -24,6 +25,10 @@ struct WalkPage: View {
                 GoalHero(onChangeGoal: { showingGoalPicker = true },
                          onClaim: claim,
                          onOpenLeaderboard: { showingLeaderboard = true })
+
+                if let goal = steps.goalReward {
+                    RaceChatCard(reward: goal, chat: chat)
+                }
 
                 if steps.access == .unavailable {
                     Label("Step counting needs Apple Health, which isn't available on this device.",
@@ -49,6 +54,14 @@ struct WalkPage: View {
             .padding(.bottom, 32)
         }
         .collapsesDock()
+        // Scrolling the page closes the keyboard.
+        .scrollDismissesKeyboard(.immediately)
+        // One chat per reward: follow your goal, and start once you're signed in.
+        .onChange(of: steps.goalReward?.id, initial: true) { _, id in chat.listen(to: id) }
+        .onChange(of: auth.user?.uid) { _, _ in
+            chat.listen(to: nil)
+            chat.listen(to: steps.goalReward?.id)
+        }
         .background(Color(.systemBackground))
         .refreshable {
             Haptics.soft()
