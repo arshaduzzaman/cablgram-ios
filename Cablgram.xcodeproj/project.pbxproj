@@ -11,6 +11,7 @@
 		A1000000000000000000001B /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000018 /* FirebaseAuth */; };
 		A1000000000000000000001C /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000019 /* FirebaseFirestore */; };
 		A1000000000000000000001D /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000001A /* GoogleSignIn */; };
+		A1000000000000000000003B /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000003A /* FirebaseMessaging */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +37,7 @@
 				A10000000000000000000013 /* GoogleMaps in Frameworks */,
 				A1000000000000000000001B /* FirebaseAuth in Frameworks */,
 				A1000000000000000000001C /* FirebaseFirestore in Frameworks */,
+				A1000000000000000000003B /* FirebaseMessaging in Frameworks */,
 				A1000000000000000000001D /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -85,6 +87,7 @@
 				A10000000000000000000014 /* GoogleMaps */,
 				A10000000000000000000018 /* FirebaseAuth */,
 				A10000000000000000000019 /* FirebaseFirestore */,
+				A1000000000000000000003A /* FirebaseMessaging */,
 				A1000000000000000000001A /* GoogleSignIn */,
 			);
 			productName = Cablgram;
@@ -201,7 +204,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Cablgram.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = L96P6GUN37;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -234,7 +237,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Cablgram.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = L96P6GUN37;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -329,6 +332,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A10000000000000000000017 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignIn;
+		};
+		A1000000000000000000003A /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000016 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

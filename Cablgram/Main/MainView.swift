@@ -82,6 +82,13 @@ struct MainView: View {
             Dock(selection: $tab, showing: showing, dock: dock)
         }
         .environment(\.dockState, dock)
+        // Ask to allow notifications once you're in, and open the tab a tapped one points to.
+        .task { await Push.requestPermission() }
+        .onReceive(PushRouter.shared.$openTab) { target in
+            guard let target else { return }
+            withAnimation(.snappy) { tab = target }
+            PushRouter.shared.openTab = nil
+        }
         .background(Color(.systemBackground))
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack(alignment: .lastTextBaseline, spacing: 1.5) {
