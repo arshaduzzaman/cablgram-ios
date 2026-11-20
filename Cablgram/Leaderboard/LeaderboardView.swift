@@ -114,15 +114,11 @@ struct LeaderboardNotice: View {
 
     @MainActor
     static func current(auth: AuthStore, leaderboard: LeaderboardStore, isEmpty: Bool, emptyText: String) -> LeaderboardNotice? {
-        var hasSamples = false
-        #if DEBUG
-        hasSamples = LeaderboardStore.showSamples
-        #endif
-        if (!AuthStore.isConfigured || auth.user == nil) && !hasSamples {
-            return LeaderboardNotice(text: "Sign in with Google to join the leaderboard.",
+        if !AuthStore.isConfigured || auth.user == nil {
+            return LeaderboardNotice(text: "Sign in to join the leaderboard.",
                                      icon: "person.crop.circle.badge.exclamationmark")
         }
-        if let error = leaderboard.errorMessage, !hasSamples {
+        if let error = leaderboard.errorMessage {
             return LeaderboardNotice(text: "Couldn't load the leaderboard: \(error)", icon: "exclamationmark.triangle.fill")
         }
         if isEmpty {

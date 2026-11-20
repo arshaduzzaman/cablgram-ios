@@ -10,6 +10,17 @@ struct ChatMessage: Identifiable, Equatable {
     let photoURL: URL?
     let text: String
     let at: Date
+    /// Set for the server's "X egged Y" event messages (`kind == "egg"`).
+    var egg: ChatEgg? = nil
+}
+
+/// The egg in an egg event message: who got hit, and what was said.
+struct ChatEgg: Equatable {
+    let toUid: String
+    let toName: String
+    let toPhotoURL: URL?
+    let message: String
+    let eggId: String?
 }
 
 /// Live chat for everyone going for the same reward: `raceChats/{rewardID}/messages`.
@@ -41,10 +52,18 @@ final class RaceChatStore: ObservableObject {
                     guard let uid = doc.get("uid") as? String, let text = doc.get("text") as? String else { return nil }
                     // A message you just sent has no server time yet: estimate it.
                     let at = (doc.get("at", serverTimestampBehavior: .estimate) as? Timestamp)?.dateValue() ?? Date()
+                    var egg: ChatEgg?
+                    if doc.get("kind") as? String == "egg", let toUid = doc.get("toUid") as? String {
+                        egg = ChatEgg(toUid: toUid,
+                                      toName: doc.get("toName") as? String ?? "Walker",
+                                      toPhotoURL: (doc.get("toPhotoURL") as? String).flatMap(URL.init(string:)),
+                                      message: (doc.get("message") as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+                                      eggId: doc.get("eggId") as? String)
+                    }
                     return ChatMessage(id: doc.documentID, uid: uid,
                                        name: doc.get("name") as? String ?? "Walker",
                                        photoURL: (doc.get("photoURL") as? String).flatMap(URL.init(string:)),
-                                       text: text, at: at)
+                                       text: text, at: at, egg: egg)
                 }
                 Task { @MainActor in
                     guard let self else { return }
@@ -88,7 +107,16 @@ struct RaceChatCard: View {
     @ObservedObject var chat: RaceChatStore
     @EnvironmentObject private var leaderboard: LeaderboardStore
     @EnvironmentObject private var auth: AuthStore
+    @EnvironmentObject private var friends: FriendsStore
+    @Environment(EggStore.self) private var eggs: EggStore?
+    @Environment(InboxStore.self) private var inbox: InboxStore?
     @State private var draft = ""
+    /// Whose profile is open (tapped picture or name).
+    @State private var profile: EggTarget?
+    /// Messages already there when the chat loaded: egg cards among them don't pop in.
+    @State private var loadedIDs: Set<String>?
+    /// Egg cards that have already popped in.
+    @State private var popped: Set<String> = []
     @FocusState private var typing: Bool
 
     private var me: String? { auth.user?.uid }
@@ -110,6 +138,25 @@ struct RaceChatCard: View {
             }
             .card()
         }
+        .onChange(of: chat.messages.map(\.id), initial: true) { _, ids in
+            if loadedIDs == nil, !ids.isEmpty { loadedIDs = Set(ids) }
+        }
+        .onChange(of: reward.id) { _, _ in
+            loadedIDs = nil
+            popped = []
+        }
+        .sheet(item: $profile) { person in
+            WalkerProfileSheet(person: person, reward: reward)
+                .environmentObject(friends)
+                .environmentObject(leaderboard)
+                .environment(eggs)
+                .environment(inbox)
+        }
+    }
+
+    private func open(_ person: EggTarget) {
+        guard person.uid != me else { return }
+        profile = person
     }
 
     private var messages: some View {
@@ -124,9 +171,19 @@ struct RaceChatCard: View {
                             .padding(.top, 60)
                     }
                     ForEach(Array(chat.messages.enumerated()), id: \.element.id) { index, message in
-                        let showsHeader = index == 0 || chat.messages[index - 1].uid != message.uid
-                        bubble(message, showsHeader: showsHeader)
-                            .id(message.id)
+                        if let egg = message.egg {
+                            EggChatCard(message: message, egg: egg, me: me,
+                                        isNew: loadedIDs.map { !$0.contains(message.id) } == true
+                                            && !popped.contains(message.id),
+                                        onOpen: open,
+                                        onShown: { popped.insert(message.id) })
+                                .id(message.id)
+                        } else {
+                            let previous = index > 0 ? chat.messages[index - 1] : nil
+                            let showsHeader = previous == nil || previous?.uid != message.uid || previous?.egg != nil
+                            bubble(message, showsHeader: showsHeader)
+                                .id(message.id)
+                        }
                     }
                 }
                 .padding(12)
@@ -149,12 +206,16 @@ struct RaceChatCard: View {
             Avatar(url: message.photoURL, name: message.name, size: 26)
                 .opacity(showsHeader ? 1 : 0)
                 .frame(height: showsHeader ? 26 : 0)
+                .contentShape(Circle())
+                .onTapGesture { if showsHeader { openProfile(of: message) } }
             VStack(alignment: .leading, spacing: 2) {
                 if showsHeader {
                     HStack(spacing: 6) {
                         Text(mine ? "You" : firstName(message.name))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(mine ? Color.brand : .primary)
+                            .contentShape(Rectangle())
+                            .onTapGesture { openProfile(of: message) }
                         if let entry = leaderboard.ranked.first(where: { $0.id == message.uid }) {
                             Text("\(min(entry.totalSteps, reward.steps).formatted()) steps")
                                 .font(.caption2)
@@ -182,6 +243,12 @@ struct RaceChatCard: View {
             }
         }
         .padding(.top, showsHeader ? 6 : 0)
+    }
+
+    private func openProfile(of message: ChatMessage) {
+        guard message.uid != me else { return }
+        Haptics.tap()
+        open(EggTarget(uid: message.uid, name: message.name, photoURL: message.photoURL))
     }
 
     /// Sends and closes the keyboard.

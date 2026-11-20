@@ -47,8 +47,6 @@ struct RaceTrack: View {
             .buttonStyle(.plain)
         }
         .animation(.smooth(duration: 0.9), value: all.map(\.steps))
-        .onAppear { leaderboard.prepareRace(for: goal, yourSteps: steps.availableSteps) }
-        .onChange(of: goal.id) { _, _ in leaderboard.prepareRace(for: goal, yourSteps: steps.availableSteps) }
     }
 
     // MARK: - Track
@@ -104,6 +102,18 @@ struct RaceTrack: View {
     // MARK: - Leader line
 
     @ViewBuilder
+    /// "12m ago" for when someone's phone last sent steps.
+    static func updatedAgo(_ date: Date?, now: Date = .now) -> String? {
+        guard let date else { return nil }
+        let minutes = max(0, Int(now.timeIntervalSince(date) / 60))
+        switch minutes {
+        case ..<2: return "just now"
+        case ..<60: return "\(minutes)m ago"
+        case ..<(24 * 60): return "\(minutes / 60)h ago"
+        default: return "\(minutes / (24 * 60))d ago"
+        }
+    }
+
     private func leaderLine(leader: Racer?, you: Racer, rank: Int, total: Int) -> some View {
         HStack(spacing: 4) {
             if let leader, leader.steps > you.steps {
@@ -118,6 +128,13 @@ struct RaceTrack: View {
                     .contentTransition(.numericText(value: Double(left)))
                 Text("steps away")
                     .lineLimit(1)
+                // Others' totals arrive every 15-30 minutes: show how fresh the leader's is.
+                if let ago = Self.updatedAgo(leader.updatedAt) {
+                    Text("· \(ago)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             } else {
                 Text("🔥 You're leading the race")
                     .fontWeight(.semibold)

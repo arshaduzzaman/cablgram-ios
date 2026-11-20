@@ -11,24 +11,54 @@ service cloud.firestore {
       // Any signed-in user can see the leaderboard.
       allow read: if request.auth != null;
 
-      // You can only write your own entry, with sane numbers.
+      // You write your own entry (name, picture, goal, steps spent), but step totals are
+      // worked out by the server (cablgram-admin /api/steps/recalc) and can't be changed here.
       allow write: if request.auth != null
         && request.auth.uid == uid
-        && request.resource.data.totalSteps is int
-        && request.resource.data.totalSteps >= 0
-        && request.resource.data.totalSteps <= 5000000
-        && request.resource.data.weekSteps is int
-        && request.resource.data.weekSteps >= 0
-        && request.resource.data.weekSteps <= 1000000
+        && !request.resource.data.diff(resource == null ? {} : resource.data).affectedKeys()
+             .hasAny(['totalSteps', 'weekSteps', 'week', 'stepDays', 'stepDetail', 'computedAt', 'formula', 'startSteps'])
         // Steps spent on eggs and headlines: never more than walked, and
         // never going back down.
         && (!('spentSteps' in request.resource.data)
             || (request.resource.data.spentSteps is int
                 && request.resource.data.spentSteps >= 0
-                && request.resource.data.spentSteps <= request.resource.data.totalSteps
+                && request.resource.data.spentSteps <= request.resource.data.get('totalSteps', 0)
                 && (resource == null
                     || !('spentSteps' in resource.data)
                     || request.resource.data.spentSteps >= resource.data.spentSteps)));
+
+      // Each phone's raw step readings, for the server to work out totals from.
+      match /devices/{deviceId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+
+    // Friends lists are written only by the server (cablgram-admin /api/friends).
+    match /friends/{uid}/list/{otherUid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Eggs thrown at friends (with a short message). Anyone signed in can see them, so an
+    // egged picture shows everywhere; only the server (cablgram-admin /api/friends) writes.
+    match /friendEggs/{eggId} {
+      allow read: if request.auth != null;
+    }
+
+    // Messages between friends: you read the conversations you're in; only the server
+    // (cablgram-admin /api/friends) writes them, after checking you're friends.
+    match /conversations/{conversationId} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.members;
+      // Members update only their own typing / delivered / read time (instant receipts).
+      allow update: if request.auth != null
+        && request.auth.uid in resource.data.members
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['typing', 'delivered', 'read'])
+        && request.resource.data.get('typing', {}).diff(resource.data.get('typing', {})).affectedKeys().hasOnly([request.auth.uid])
+        && request.resource.data.get('delivered', {}).diff(resource.data.get('delivered', {})).affectedKeys().hasOnly([request.auth.uid])
+        && request.resource.data.get('read', {}).diff(resource.data.get('read', {})).affectedKeys().hasOnly([request.auth.uid]);
+      match /messages/{messageId} {
+        allow read: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.members;
+      }
     }
 
     // Profile for the admin dashboard: platform, app version, push token, last seen.
@@ -39,10 +69,35 @@ service cloud.firestore {
         && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['name', 'email', 'photoURL', 'platform',
              'appVersion', 'build', 'osVersion', 'device', 'notifications', 'timezone',
-             'fcmToken', 'lastSeen'])
+             'fcmToken', 'lastSeen', 'location', 'stepCheck', 'dateOfBirth', 'phone'])
         && request.resource.data.platform in ['ios', 'android']
-        && request.resource.data.lastSeen == request.time;
-    }
+        && request.resource.data.lastSeen == request.time
+        // Date of birth as YYYY-MM-DD; the phone number only as verified by sign-in.
+        && (!('dateOfBirth' in request.resource.data)
+            || (request.resource.data.dateOfBirth is string
+                && request.resource.data.dateOfBirth.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')))
+        && (!('phone' in request.resource.data)
+            || request.resource.data.phone == request.auth.token.phone_number)
+        // Approximate area only: no extra fields.
+        && (!('location' in request.resource.data)
+            || request.resource.data.location.keys().hasOnly(['lat', 'lng', 'city', 'region',
+                 'country', 'countryCode', 'at']));
+
+      // Walks recorded while the Walk tab is open. You can add yours (never edit
+      // them); only the dashboard reads them, with the Admin SDK.
+      match /routes/{routeId} {
+        allow create: if request.auth != null
+          && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['startedAt', 'endedAt', 'distance', 'points',
+               'platform', 'savedAt'])
+          && request.resource.data.distance is int
+          && request.resource.data.distance >= 0
+          && request.resource.data.distance <= 200000
+          && request.resource.data.points is list
+          && request.resource.data.points.size() <= 1500
+          && request.resource.data.platform in ['ios', 'android']
+          && request.resource.data.savedAt == request.time;
+      }
 
     // Race chat: everyone going for the same reward. Signed-in users read and post;
     // you can delete only your own messages, and nobody can edit one.

@@ -4,7 +4,7 @@ import SwiftUI
 /// on a 24×24 grid. Unselected they're outlines; selected they're filled
 /// (with the details cut out), like the tab icons in big social apps.
 struct DockIcon: View {
-    enum Kind { case home, walk, ticket }
+    enum Kind { case home, walk, ticket, people }
 
     let kind: Kind
     let selected: Bool
@@ -29,6 +29,11 @@ struct DockIcon: View {
                 }
             case (.ticket, true):
                 TicketFilled().fill(color, style: FillStyle(eoFill: true))
+            case (.people, let selected):
+                // Friends: Apple's two-people symbol, sized to sit with the drawn icons.
+                Image(systemName: selected ? "person.2.fill" : "person.2")
+                    .font(.system(size: size * 0.62, weight: .semibold))
+                    .foregroundStyle(color)
             }
         }
         .frame(width: size, height: size)

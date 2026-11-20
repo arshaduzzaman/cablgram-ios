@@ -1,5 +1,6 @@
 import SwiftUI
 import GoogleSignIn
+import FirebaseAuth
 
 @main
 struct CablgramApp: App {
@@ -10,8 +11,10 @@ struct CablgramApp: App {
     @StateObject private var leaderboard = LeaderboardStore()
 
     init() {
-        // Firebase must be set up before AuthStore reads the current user.
-        AuthStore.configureFirebase()
+        // Firebase is set up in AppDelegate.didFinishLaunching, not here: this runs before
+        // iOS has created the app, and Firebase Auth then skips setting up phone sign-in
+        // (ERROR_NOTIFICATION_NOT_FORWARDED). The stores below are created lazily, when the
+        // first screen is built, which is after didFinishLaunching.
         GoogleMapsConfig.activate()
         _auth = StateObject(wrappedValue: AuthStore())
     }
@@ -19,10 +22,17 @@ struct CablgramApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if auth.canEnterApp {
-                    MainView()
-                } else {
+                if !auth.canEnterApp {
                     SignInView()
+                } else if auth.user != nil && !auth.profileLoaded {
+                    ZStack {
+                        Color.brand.ignoresSafeArea()
+                        ProgressView().tint(.white)
+                    }
+                } else if auth.needsProfile {
+                    ProfileGateView()
+                } else {
+                    MainView()
                 }
             }
             .environmentObject(auth)
@@ -31,10 +41,19 @@ struct CablgramApp: App {
             .tint(.brand)
             .preferredColorScheme(.light)
             // Keep users/{uid} fresh for the admin dashboard.
-            .onChange(of: auth.user?.uid, initial: true) { UserProfile.sync(force: true) }
-            .onChange(of: scenePhase) { if scenePhase == .active { UserProfile.sync() } }
+            .onChange(of: auth.user?.uid, initial: true) {
+                UserProfile.sync(force: true)
+                LocationTracker.shared.refreshArea(force: true)
+            }
+            .onChange(of: scenePhase) {
+                if scenePhase == .active {
+                    UserProfile.sync()
+                    LocationTracker.shared.refreshArea()
+                }
+            }
             .onOpenURL { url in
-                // Returns from the Google sign-in page.
+                // Returns from the phone check (reCAPTCHA).
+                if AuthStore.isConfigured, Auth.auth().canHandle(url) { return }
                 GIDSignIn.sharedInstance.handle(url)
             }
         }

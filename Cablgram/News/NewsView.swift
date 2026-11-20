@@ -10,11 +10,25 @@ struct NewsView: View {
 
     @EnvironmentObject private var steps: StepStore
     @EnvironmentObject private var auth: AuthStore
+    @EnvironmentObject private var leaderboard: LeaderboardStore
     @StateObject private var feed = NewsFeed()
     @StateObject private var social = NewsSocial()
     /// Posts currently on screen; only these are listened to. Not state:
     /// changing it as you scroll shouldn't redraw the feed.
     @State private var onScreen = OnScreen()
+
+    /// Name and picture of everyone who threw at a post, so their face
+    /// shows by their splat. Only those people, so a step update for
+    /// someone else doesn't redraw the post.
+    private func faces(for eggs: [EggMark]) -> [String: EggFace] {
+        let throwers = Set(eggs.compactMap(\.uid))
+        guard !throwers.isEmpty else { return [:] }
+        var faces: [String: EggFace] = [:]
+        for entry in leaderboard.entries where throwers.contains(entry.id) {
+            faces[entry.id] = EggFace(name: entry.name, photoURL: entry.photoURL)
+        }
+        return faces
+    }
 
     var body: some View {
         ScrollView {
@@ -31,6 +45,7 @@ struct NewsView: View {
                 ForEach(feed.posts) { post in
                     PostRow(post: post,
                             eggs: social.eggs(post.id),
+                            faces: faces(for: social.eggs(post.id)),
                             headlines: social.headlines(post.id),
                             myID: auth.user?.uid,
                             lovers: social.loves(post.id),
@@ -161,7 +176,7 @@ private struct IconPress: ButtonStyle {
 
 /// A line-style egg with a crack across it, drawn on a 24-point grid to sit
 /// alongside SF Symbols like the heart.
-private struct EggIcon: Shape {
+struct EggIcon: Shape {
     func path(in rect: CGRect) -> Path {
         func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
             CGPoint(x: rect.minX + x / 24 * rect.width, y: rect.minY + y / 24 * rect.height)
@@ -327,13 +342,15 @@ private struct PostRow: View, Equatable {
     /// Rows only redraw when what they show changes (the actions are the
     /// same each time, so they're left out).
     static func == (a: PostRow, b: PostRow) -> Bool {
-        a.post == b.post && a.eggs == b.eggs && a.headlines == b.headlines
+        a.post == b.post && a.eggs == b.eggs && a.faces == b.faces && a.headlines == b.headlines
             && a.myID == b.myID && a.lovers == b.lovers && a.myLoveKey == b.myLoveKey
             && a.myName == b.myName && a.myPhotoURL == b.myPhotoURL && a.availableSteps == b.availableSteps
     }
 
     let post: NewsPost
     let eggs: [EggMark]
+    /// Who threw them (by user id), for the faces by their splats.
+    let faces: [String: EggFace]
     let headlines: [Headline]
     let myID: String?
     /// Everyone who loved this post (user ids), and how to love or unlove it.
@@ -479,7 +496,7 @@ private struct PostRow: View, Equatable {
                                         onTaps: taps)
                     }
                     .overlay {
-                        myMarkers.opacity(splatsHidden ? 0 : 1).allowsHitTesting(!splatsHidden)
+                        throwerMarkers.opacity(splatsHidden ? 0 : 1).allowsHitTesting(!splatsHidden)
                     }
                     .overlay { loveBurstView }
                     .overlay { holdOverlay }
@@ -688,36 +705,51 @@ private struct PostRow: View, Equatable {
 
     // MARK: - Eggs
 
-    /// Your profile picture pinned beside each of your splats. When the post
-    /// is crowded with other people's, yours also get a pink outline.
-    private var myMarkers: some View {
+    /// Each thrower's profile picture pinned at the top right of their
+    /// latest splat: yours and everyone else's. When the post is crowded,
+    /// your splats also get a pink outline.
+    private var throwerMarkers: some View {
         GeometryReader { geo in
             let radius = EggArt.size * geo.size.width * eggScale.to
-            // Just one picture: by your latest splat.
-            ForEach(eggs.filter { $0.id == latestMine }) { egg in
+            ForEach(markers) { marker in
+                let egg = marker.egg
                 let center = CGPoint(x: egg.x * geo.size.width, y: egg.y * geo.size.height)
                 ZStack(alignment: .topTrailing) {
                     Color.clear
                         .frame(width: radius * 2, height: radius * 2)
-                    Avatar(url: myPhotoURL, name: myName, size: 24)
+                    Avatar(url: marker.face.photoURL, name: marker.face.name, size: 24)
                         .overlay(Circle().stroke(.white, lineWidth: 2))
                         .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
                         .offset(x: 10, y: -10)
                 }
                 .allowsHitTesting(false)
                 .position(center)
+                .zIndex(marker.isYou ? 1 : 0)
                 .transition(.scale.combined(with: .opacity))
-                .accessibilityLabel("Your egg")
+                .accessibilityLabel(marker.isYou ? "Your egg" : "\(marker.face.name)'s egg")
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.6), value: landing.keys.sorted())
     }
 
-    /// Your most recent splat that has finished landing.
-    private var latestMine: String? {
-        guard revealed else { return nil }
-        return eggs.filter { myEggs.contains($0.id) && landing[$0.id] == nil }
-            .last?.id
+    /// One picture per person, by their most recent splat that has finished
+    /// landing. People we have no name for (not on the leaderboard) get none.
+    private var markers: [ThrowerMarker] {
+        guard revealed else { return [] }
+        let mine = myEggs
+        var latest: [String: EggMark] = [:]
+        for egg in eggs where landing[egg.id] == nil {
+            let who = mine.contains(egg.id) ? "you" : egg.uid
+            if let who { latest[who] = egg }
+        }
+        return latest.compactMap { who, egg in
+            if who == "you" {
+                return ThrowerMarker(egg: egg, face: EggFace(name: myName, photoURL: myPhotoURL), isYou: true)
+            }
+            guard let face = faces[who] else { return nil }
+            return ThrowerMarker(egg: egg, face: face, isYou: false)
+        }
+        .sorted { $0.egg.id < $1.egg.id }
     }
 
     /// Enough other people's splats that yours need an outline to stand out.
@@ -1201,4 +1233,18 @@ struct CablgramAvatar: View {
             .clipShape(Circle())
             .overlay(Circle().stroke(Color(.separator).opacity(0.5), lineWidth: 1 / 3))
     }
+}
+
+/// A thrower's name and picture.
+struct EggFace: Equatable {
+    let name: String
+    let photoURL: URL?
+}
+
+/// A thrower's picture and the splat it sits by.
+private struct ThrowerMarker: Identifiable {
+    let egg: EggMark
+    let face: EggFace
+    let isYou: Bool
+    var id: String { isYou ? "you" : egg.uid ?? egg.id }
 }

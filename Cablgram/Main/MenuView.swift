@@ -8,7 +8,6 @@ struct MenuView: View {
 
     @AppStorage(Haptics.enabledKey) private var hapticsOn = true
     #if DEBUG
-    @AppStorage(LeaderboardStore.sampleWalkersKey) private var sampleWalkers = true
     #endif
 
     private var claimed: [Reward] { Reward.all.filter(steps.isClaimed) }
@@ -20,8 +19,8 @@ struct MenuView: View {
                     Avatar(url: auth.user?.photoURL, name: auth.displayName, size: 60)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(auth.displayName).font(.title3.bold())
-                        if let email = auth.user?.email {
-                            Text(email).font(.subheadline).foregroundStyle(.secondary)
+                        if let detail = auth.phoneNumber ?? auth.user?.email {
+                            Text(detail).font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
                     Spacer()
@@ -54,6 +53,8 @@ struct MenuView: View {
                     .card()
                 }
 
+                ProfileSettings()
+
                 Toggle(isOn: $hapticsOn) {
                     Label("Haptics", systemImage: "iphone.radiowaves.left.and.right")
                         .font(.headline)
@@ -64,24 +65,6 @@ struct MenuView: View {
                 .onChange(of: hapticsOn) { _, on in
                     if on { Haptics.success() }
                 }
-
-                #if DEBUG
-                Toggle(isOn: $sampleWalkers) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Sample walkers").font(.headline)
-                        Text("Test builds only. Never uploaded or shown in the App Store version.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .tint(.brand)
-                .padding(16)
-                .card(cornerRadius: 16)
-                .onChange(of: sampleWalkers) { _, _ in
-                    Haptics.select()
-                    leaderboard.objectWillChange.send()
-                }
-                #endif
 
                 Button(role: .destructive) {
                     Haptics.warning()

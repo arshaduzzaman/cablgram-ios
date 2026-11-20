@@ -9,9 +9,14 @@ struct LeaderboardEntry: Identifiable, Equatable {
     var totalSteps: Int
     var weekSteps: Int
     /// Week (e.g. 2026-W45) that `weekSteps` belongs to.
-    let week: String
+    var week: String
     /// Steps spent on eggs and headlines (kept so it follows you between phones).
     var spentSteps: Int = 0
+    /// Sent from a Simulator or emulator (Google Play's review bots, our own
+    /// testing): hidden from everyone else.
+    var test: Bool = false
+    /// When their phone last sent steps.
+    var updatedAt: Date? = nil
 }
 
 /// Someone in the race to your goal reward, and how far along they are.
@@ -23,37 +28,59 @@ struct Racer: Identifiable, Equatable {
     let steps: Int
     let isYou: Bool
     let finished: Bool
+    /// When their phone last sent steps. Totals arrive every 15-30 minutes.
+    var updatedAt: Date? = nil
 
     var firstName: String { name.components(separatedBy: " ").first ?? name }
 }
 
 /// Live leaderboard from Firestore's `walkers` collection. Each signed-in
-/// user writes their own document (`walkers/{uid}`) with their step totals.
+/// user writes their own document (`walkers/{uid}`) with their name and spent
+/// steps, plus their phone's raw Health days in `walkers/{uid}/devices/{deviceId}`.
+/// The server works out the step totals from those and writes them back.
 @MainActor
 final class LeaderboardStore: ObservableObject {
     @Published private(set) var entries: [LeaderboardEntry] = []
     @Published private(set) var errorMessage: String?
 
-    #if DEBUG
-    /// Sample walkers, ticking up in real time (test builds only).
-    @Published private(set) var samples: [LeaderboardEntry] = LeaderboardStore.sampleWalkers
-    /// Sample walkers' progress in the race to the current goal reward.
-    @Published private(set) var sampleRace: [String: Int] = [:]
-    private var raceGoal: (id: String, steps: Int)?
-    private var finishedAt: [String: Date] = [:]
-    private var simulation: Task<Void, Never>?
-    #endif
+    /// Your own totals as shown on this phone (server + steps since), so your
+    /// row doesn't lag behind the number on the Walk page.
+    @Published private(set) var yours: (uid: String, total: Int, week: Int)?
 
     private var listener: ListenerRegistration?
+    private var lastUploaded: Upload?
+    /// Counts recalc requests so only the newest answer is used.
+    private var recalcCount = 0
 
-    init() {
-        #if DEBUG
-        startSimulation()
-        #endif
+    private struct Upload: Equatable {
+        let uid: String
+        let localTotal: Int
+        let localWeek: Int
+        let spent: Int
+        /// The goal reward's id, so friends see what you're going for.
+        let goal: String?
+        let days: [String: Int]?
     }
-    private var lastUploaded: (uid: String, total: Int, week: Int, spent: Int)?
 
-    static var weekKey: String {
+    /// What `/api/steps/recalc` answers.
+    struct Recalc: Decodable {
+        let totalSteps: Int
+        let weekSteps: Int
+        let week: String
+    }
+
+    nonisolated private static let recalcURL = URL(string: "https://cablgram-admin.vercel.app/api/steps/recalc")!
+
+    /// Random ID for this install, made once. Names this phone's doc under `devices`.
+    nonisolated static var deviceID: String {
+        let key = "walk.deviceId"
+        if let saved = UserDefaults.standard.string(forKey: key) { return saved }
+        let id = UUID().uuidString
+        UserDefaults.standard.set(id, forKey: key)
+        return id
+    }
+
+    nonisolated static var weekKey: String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -77,7 +104,9 @@ final class LeaderboardStore: ObservableObject {
                         totalSteps: (data["totalSteps"] as? NSNumber)?.intValue ?? 0,
                         weekSteps: (data["weekSteps"] as? NSNumber)?.intValue ?? 0,
                         week: data["week"] as? String ?? "",
-                        spentSteps: (data["spentSteps"] as? NSNumber)?.intValue ?? 0
+                        spentSteps: (data["spentSteps"] as? NSNumber)?.intValue ?? 0,
+                        test: data["test"] as? Bool ?? false,
+                        updatedAt: (data["updatedAt"] as? Timestamp)?.dateValue()
                     )
                 }
                 let message = error?.localizedDescription
@@ -94,25 +123,31 @@ final class LeaderboardStore: ObservableObject {
         entries = []
     }
 
-    /// Saves the signed-in user's steps, skipping writes when nothing changed.
-    func upload(totalSteps: Int, weekSteps: Int, spentSteps: Int) {
+    /// Saves the signed-in user's name, spent steps, goal reward and this phone's Health days,
+    /// then asks the server to recalculate. Skips it all when nothing changed.
+    /// The server's answer goes back to `steps`; failures are ignored (the
+    /// server also recalculates everyone daily).
+    func upload(_ steps: StepStore) {
         guard AuthStore.isConfigured, let user = Auth.auth().currentUser else { return }
-        if let last = lastUploaded, last.uid == user.uid, last.total == totalSteps,
-           last.week == weekSteps, last.spent == spentSteps {
-            return
-        }
-        lastUploaded = (user.uid, totalSteps, weekSteps, spentSteps)
+        // Until Health has answered there are no real days to send.
+        let days = steps.access == .ready && steps.hasLoaded ? steps.dailySteps : nil
+        let upload = Upload(uid: user.uid, localTotal: steps.stepsSinceJoining, localWeek: steps.localWeek,
+                            spent: steps.spentSteps, goal: steps.goalReward?.id, days: days)
+        if upload == lastUploaded { return }
+        lastUploaded = upload
 
         var data: [String: Any] = [
             "name": user.displayName ?? "Walker",
-            "totalSteps": totalSteps,
-            "weekSteps": weekSteps,
-            "spentSteps": spentSteps,
-            "week": Self.weekKey,
+            "spentSteps": upload.spent,
+            "goal": upload.goal.map { $0 as Any } ?? FieldValue.delete(),
             "updatedAt": FieldValue.serverTimestamp(),
         ]
         data["photoURL"] = user.photoURL?.absoluteString
-        Firestore.firestore().collection("walkers").document(user.uid).setData(data, merge: true) { [weak self] error in
+        #if targetEnvironment(simulator)
+        data["test"] = true // keeps Simulator runs off real people's leaderboard
+        #endif
+        let walker = Firestore.firestore().collection("walkers").document(user.uid)
+        walker.setData(data, merge: true) { [weak self] error in
             guard let error else { return }
             let message = error.localizedDescription
             Task { @MainActor in
@@ -120,17 +155,72 @@ final class LeaderboardStore: ObservableObject {
                 self?.lastUploaded = nil
             }
         }
+
+        guard let days else { return }
+        recalcCount += 1
+        let count = recalcCount
+        let uid = user.uid
+        Task { [weak self] in
+            do {
+                try await Self.saveDevice(uid: uid, days: days)
+            } catch {
+                self?.errorMessage = error.localizedDescription
+                self?.lastUploaded = nil
+                return
+            }
+            guard let result = await Self.recalc(),
+                  let self, count == self.recalcCount, Auth.auth().currentUser?.uid == uid else { return }
+            steps.applyServerSync(.init(total: result.totalSteps, week: result.weekSteps, weekKey: result.week,
+                                        localTotal: upload.localTotal, localWeek: upload.localWeek), uid: uid)
+        }
     }
 
-    /// Everyone to show, highest total first. In test builds this can include
-    /// made-up sample walkers; they're never uploaded and never in release builds.
+    /// This phone's Health days (raw, per local day) for the server to count from:
+    /// `walkers/{uid}/devices/{deviceId}`. Also used by `BackgroundSteps`.
+    nonisolated static func saveDevice(uid: String, days: [String: Int]) async throws {
+        let device: [String: Any] = [
+            "platform": "ios",
+            "build": Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0,
+            "timezone": TimeZone.current.identifier,
+            "updatedAt": FieldValue.serverTimestamp(),
+            "days": days,
+        ]
+        try await Firestore.firestore().collection("walkers").document(uid)
+            .collection("devices").document(deviceID).setData(device)
+    }
+
+    /// Asks the server to work out the signed-in user's totals again.
+    /// Returns `nil` on any failure.
+    nonisolated static func recalc() async -> Recalc? {
+        guard let user = Auth.auth().currentUser, let token = try? await user.getIDToken() else { return nil }
+        var request = URLRequest(url: recalcURL, timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("{}".utf8)
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return try? JSONDecoder().decode(Recalc.self, from: data)
+    }
+
+    /// Sets the totals your own row shows (what the Walk page shows).
+    func showYourSteps(uid: String?, total: Int, week: Int) {
+        let new = uid.map { (uid: $0, total: total, week: week) }
+        if new?.uid == yours?.uid, new?.total == yours?.total, new?.week == yours?.week { return }
+        yours = new
+    }
+
+    /// Everyone to show, highest total first. Test accounts only show to themselves.
     var ranked: [LeaderboardEntry] {
-        #if DEBUG
-        if Self.showSamples {
-            return (entries + samples).sorted { $0.totalSteps > $1.totalSteps }
+        let you = Auth.auth().currentUser?.uid
+        var list = entries.filter { !$0.test || $0.id == you }
+        if let yours, yours.uid == you, let index = list.firstIndex(where: { $0.id == yours.uid }) {
+            list[index].totalSteps = yours.total
+            list[index].weekSteps = yours.week
+            list[index].week = Self.weekKey
+            list.sort { $0.totalSteps > $1.totalSteps }
         }
-        #endif
-        return entries
+        return list
     }
 
     /// 1-based all-time rank of a user, if they're in the top 100.
@@ -147,115 +237,16 @@ final class LeaderboardStore: ObservableObject {
 
     // MARK: - Race to the reward
 
-    /// Everyone racing to `goal`, closest to it first. Real walkers use their
-    /// total steps; in test builds sample walkers race too.
+    /// Everyone racing to `goal`, closest to it first, by total steps.
     func race(for goal: Reward, yourSteps: Int, uid: String?, name: String, photoURL: URL?) -> [Racer] {
-        var racers = entries
+        var racers = ranked
             .filter { $0.id != uid }
             .map { Racer(id: $0.id, name: $0.name, photoURL: $0.photoURL,
                          steps: min($0.totalSteps, goal.steps), isYou: false,
-                         finished: $0.totalSteps >= goal.steps) }
-        #if DEBUG
-        if Self.showSamples, raceGoal?.id == goal.id {
-            racers += samples.map { sample in
-                let steps = min(sampleRace[sample.id] ?? 0, goal.steps)
-                return Racer(id: sample.id, name: sample.name, photoURL: nil, steps: steps,
-                             isYou: false, finished: steps >= goal.steps)
-            }
-        }
-        #endif
+                         finished: $0.totalSteps >= goal.steps, updatedAt: $0.updatedAt) }
         racers.append(Racer(id: uid ?? "you", name: name, photoURL: photoURL,
                             steps: min(yourSteps, goal.steps), isYou: true,
                             finished: yourSteps >= goal.steps))
         return racers.sorted { $0.steps > $1.steps }
     }
-
-    /// Lines up the sample walkers for a race to `goal` (test builds only):
-    /// a few just ahead of you, the rest behind.
-    func prepareRace(for goal: Reward, yourSteps: Int) {
-        #if DEBUG
-        guard raceGoal?.id != goal.id else { return }
-        raceGoal = (goal.id, goal.steps)
-        finishedAt = [:]
-        let you = min(yourSteps, goal.steps)
-        let ahead = [0.93, 0.82, 0.7, 0.57, 0.44, 0.31, 0.2]
-        var race: [String: Int] = [:]
-        for (index, sample) in samples.enumerated() {
-            if index < ahead.count {
-                race[sample.id] = you + Int(Double(max(goal.steps - you, 1)) * ahead[index])
-            } else {
-                race[sample.id] = Int(Double(you) * Double.random(in: 0.2...0.95))
-            }
-        }
-        sampleRace = race
-        #endif
-    }
-
-    #if DEBUG
-    /// Every second, sample walkers take a few steps, like people out walking.
-    private func startSimulation() {
-        simulation = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-                self?.tick()
-            }
-        }
-    }
-
-    private func tick() {
-        guard Self.showSamples else { return }
-        var race = sampleRace
-        samples = samples.map { sample in
-            // Most are walking at any moment; some pause.
-            guard Double.random(in: 0...1) < 0.65 else { return sample }
-            let stepsNow = Int.random(in: 2...14)
-            var updated = sample
-            updated.totalSteps += stepsNow
-            updated.weekSteps += stepsNow
-            if let goal = raceGoal, let current = race[sample.id] {
-                race[sample.id] = min(current + stepsNow, goal.steps)
-            }
-            return updated
-        }
-        // Whoever reached the reward keeps their spot a few seconds, then
-        // starts another race from further back.
-        if let goal = raceGoal {
-            for (id, steps) in race where steps >= goal.steps {
-                if let done = finishedAt[id] {
-                    if Date.now.timeIntervalSince(done) > 6 {
-                        race[id] = Int(Double(goal.steps) * Double.random(in: 0.05...0.25))
-                        finishedAt[id] = nil
-                    }
-                } else {
-                    finishedAt[id] = .now
-                }
-            }
-        }
-        sampleRace = race
-    }
-
-    static let sampleWalkersKey = "debug.sampleWalkers"
-
-    /// Sample walkers on/off (Menu, debug builds). On by default.
-    static var showSamples: Bool {
-        UserDefaults.standard.object(forKey: sampleWalkersKey) as? Bool ?? true
-    }
-
-    /// Made-up walkers with common Bangladeshi names, for trying the
-    /// leaderboard before real users join. Test builds only; not real people.
-    static let sampleWalkers: [LeaderboardEntry] = [
-        ("Tanvir Ahmed", 184_250, 12_480), ("Nusrat Jahan", 171_900, 9_820),
-        ("Rafiqul Islam", 158_340, 11_050), ("Farhana Akter", 142_760, 7_640),
-        ("Sabbir Hossain", 129_510, 13_210), ("Sumaiya Rahman", 118_030, 6_930),
-        ("Arif Chowdhury", 104_870, 8_410), ("Tasnim Haque", 93_220, 10_370),
-        ("Mahfuz Alam", 81_690, 5_280), ("Shaila Sultana", 72_450, 7_960),
-        ("Imran Kabir", 61_380, 4_120), ("Rumana Begum", 52_910, 6_340),
-        ("Fahim Mahmud", 43_770, 3_890), ("Jannatul Ferdous", 35_160, 5_510),
-        ("Rakib Uddin", 27_480, 2_740), ("Sadia Islam", 19_620, 4_380),
-        ("Nayeem Hasan", 12_350, 1_970), ("Mim Akter", 6_840, 2_610),
-    ].enumerated().map { index, walker in
-        LeaderboardEntry(id: "sample-\(index)", name: walker.0, photoURL: nil,
-                         totalSteps: walker.1, weekSteps: walker.2, week: weekKey)
-    }
-    #endif
 }

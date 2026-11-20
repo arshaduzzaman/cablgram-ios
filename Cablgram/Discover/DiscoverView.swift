@@ -97,8 +97,10 @@ struct DiscoverView: View {
                     }
                 }
                 .scrollTargetLayout()
-                .padding(.horizontal, 16)
             }
+            // Margins the snapping respects (padding inside the scroll view would be ignored,
+            // leaving the first card cut off at the left edge).
+            .contentMargins(.horizontal, 16, for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)
         }
         .padding(.top, 16)
@@ -219,25 +221,33 @@ private struct FeaturedCard: View {
                             .padding(8)
                     }
                 }
-            HStack(alignment: .firstTextBaseline) {
-                Text(event.title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                if let price = event.priceText {
-                    Text(price)
-                        .font(.footnote.weight(.bold))
-                        .foregroundStyle(Color.brand)
-                }
-            }
+            // Everything stays inside the card's width, even with large text: the title
+            // gets two lines, the rest shortens instead of spilling into the next card.
+            Text(event.title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 8) {
                 Text(event.whenText)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
                 Spacer(minLength: 0)
+                if let price = event.priceText {
+                    Text(price)
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(Color.brand)
+                        .lineLimit(1)
+                        .layoutPriority(2)
+                }
                 SourceTag(name: event.sourceName)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
         .contentShape(Rectangle())
     }
 }
@@ -250,6 +260,8 @@ private struct SourceTag: View {
         Text(name)
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize()
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(Color(.secondarySystemBackground), in: Capsule())
@@ -266,15 +278,18 @@ private struct RemoteImage: View {
     @State private var image: UIImage?
 
     var body: some View {
-        ZStack {
-            Color(.secondarySystemBackground)
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
+        // The background sets the size; the picture only fills it. (In a ZStack a filled
+        // picture that isn't the banner's shape reported its bigger size, so a Featured
+        // card grew wider than its slot and slid under the next one.)
+        Color(.secondarySystemBackground)
+            .overlay {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                }
             }
-        }
-        .clipped()
+            .clipped()
         .task(id: url) {
             guard let url else { return }
             let side = maxSide * UIScreen.main.scale

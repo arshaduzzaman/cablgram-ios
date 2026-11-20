@@ -10,8 +10,15 @@ final class StepStore: ObservableObject {
     enum Access { case notRequested, ready, unavailable }
 
     @Published private(set) var access: Access = .notRequested
+    /// Health steps since joining, counted on this phone (`localTotal` in the step contract).
     @Published private(set) var stepsSinceJoining = 0
-    @Published private(set) var stepsThisWeek = 0
+    /// Health steps this week, counted on this phone (`localWeek` in the step contract).
+    @Published private(set) var localWeek = 0
+    /// Health steps per local calendar day ("yyyy-MM-dd"), newest 60 days since
+    /// joining. Sent to the server, which works out the real totals.
+    @Published private(set) var dailySteps: [String: Int] = [:]
+    /// The server's totals from the last recalc, for the signed-in user.
+    @Published private(set) var sync: ServerSync?
     /// True once the first step count has arrived (or Health is unavailable),
     /// so the UI can tell real progress apart from the initial load.
     @Published private(set) var hasLoaded = false
@@ -26,6 +33,7 @@ final class StepStore: ObservableObject {
     private let stepType = HKQuantityType(.stepCount)
     private let defaults = UserDefaults.standard
     private var observer: HKObserverQuery?
+    private var syncUID: String?
 
     let joinDate: Date
 
@@ -56,13 +64,59 @@ final class StepStore: ObservableObject {
         #endif
     }
 
-    /// Every step walked since joining (shown on the leaderboard).
+    /// Every step walked since joining (shown on the leaderboard): the server's
+    /// total plus whatever this phone counted since that sync, so it stays live
+    /// without waiting on the network. Before any sync it's the phone's own count.
     var totalSteps: Int {
+        var total = stepsSinceJoining
+        if let sync {
+            total = sync.total + max(0, stepsSinceJoining - sync.localTotal)
+        }
         #if DEBUG
-        return stepsSinceJoining + testSteps
-        #else
-        return stepsSinceJoining
+        total += testSteps
         #endif
+        return total
+    }
+
+    /// Steps this week, worked out like `totalSteps`. A server value from a
+    /// past week is ignored.
+    var stepsThisWeek: Int {
+        var week = localWeek
+        if let sync, sync.weekKey == LeaderboardStore.weekKey {
+            week = sync.week + max(0, localWeek - sync.localWeek)
+        }
+        return week
+    }
+
+    // MARK: - Server totals
+
+    /// What the server said after a recalc, and this phone's own counts at the
+    /// moment of that upload (so later steps can be added on top).
+    struct ServerSync: Codable, Equatable {
+        var total: Int
+        var week: Int
+        var weekKey: String
+        var localTotal: Int
+        var localWeek: Int
+    }
+
+    /// Switches the server totals to `uid`'s (saved per user), or clears them
+    /// when signed out.
+    func setUser(_ uid: String?) {
+        guard uid != syncUID else { return }
+        syncUID = uid
+        sync = uid.flatMap { uid in
+            defaults.data(forKey: "walk.sync.\(uid)").flatMap { try? JSONDecoder().decode(ServerSync.self, from: $0) }
+        }
+    }
+
+    /// Saves the server's totals after a successful recalc for `uid`.
+    func applyServerSync(_ value: ServerSync, uid: String) {
+        guard uid == syncUID else { return }
+        sync = value
+        if let data = try? JSONEncoder().encode(value) {
+            defaults.set(data, forKey: "walk.sync.\(uid)")
+        }
     }
 
     /// Steps you have to use: walked minus spent. These count toward rewards.
@@ -152,13 +206,31 @@ final class StepStore: ObservableObject {
         guard access == .ready else { return }
         let startOfWeek = Calendar.current.dateInterval(of: .weekOfYear, for: .now)?.start
             ?? Calendar.current.startOfDay(for: .now)
-        stepsSinceJoining = await sumOfSteps(from: joinDate)
-        stepsThisWeek = await sumOfSteps(from: startOfWeek)
+        let total = await sumOfSteps(from: joinDate)
+        let week = await sumOfSteps(from: startOfWeek)
+        let days = await stepsPerDay()
+        // Set together so one change means one upload.
+        stepsSinceJoining = total
+        localWeek = week
+        if days != dailySteps { dailySteps = days }
         hasLoaded = true
     }
 
+    /// Steps typed in by hand in the Health app don't count, only ones the
+    /// iPhone, Watch or a fitness app measured. Samples without the key count.
+    private static let notUserEntered = NSPredicate(format: "metadata.%K != YES", HKMetadataKeyWasUserEntered)
+
+    /// Health steps for each local calendar day from the join day (at most the
+    /// newest 60 days) to today, keyed "yyyy-MM-dd".
+    private func stepsPerDay() async -> [String: Int] {
+        await HealthDays.fetch(from: health, joinDate: joinDate)
+    }
+
     private func sumOfSteps(from start: Date) async -> Int {
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: nil)
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            HKQuery.predicateForSamples(withStart: start, end: nil),
+            Self.notUserEntered,
+        ])
         let descriptor = HKStatisticsQueryDescriptor(
             predicate: .quantitySample(type: stepType, predicate: predicate),
             options: .cumulativeSum

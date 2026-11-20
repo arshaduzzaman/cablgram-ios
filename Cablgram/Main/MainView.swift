@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case news, walk, discover, menu
+    case news, walk, friends, discover, menu
 
     var id: String { rawValue }
 
@@ -9,6 +9,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .news: "News"
         case .walk: "Walk"
+        case .friends: "Messages"
         case .discover: "Discover"
         case .menu: "Menu"
         }
@@ -18,6 +19,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .news: "house"
         case .walk: "figure.walk"
+        case .friends: "person.2"
         case .discover: "ticket"
         case .menu: "line.3.horizontal"
         }
@@ -28,6 +30,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .news, .menu: .home
         case .walk: .walk
+        case .friends: .people
         case .discover: .ticket
         }
     }
@@ -36,6 +39,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .news: "house.fill"
         case .walk: "figure.walk"
+        case .friends: "person.2.fill"
         case .discover: "ticket.fill"
         case .menu: "line.3.horizontal"
         }
@@ -47,12 +51,19 @@ enum AppTab: String, CaseIterable, Identifiable {
 /// Instagram), and a floating, rounded pink dock at the bottom.
 struct MainView: View {
     @State private var tab: AppTab = .news
+    @Environment(\.scenePhase) private var scenePhase
     /// The page mostly on screen while you swipe, so the dock follows your
     /// finger instead of waiting for the swipe to settle.
     @State private var showing: AppTab = .news
     /// Held, not watched: when the dock shrinks only the dock redraws, not
     /// every page.
     @State private var dock = DockState()
+    /// Friends and the eggs on them, shared by every page (avatars show splats).
+    @StateObject private var friends = FriendsStore()
+    @State private var eggs = EggStore()
+    /// Conversations with friends (the Messages tab).
+    @State private var inbox = InboxStore()
+
 
     var body: some View {
         // The pages run all the way to the bottom of the screen and the dock
@@ -77,17 +88,31 @@ struct MainView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             // Room at the end of every page so the last item clears the dock.
             .contentMargins(.bottom, 92, for: .scrollContent)
-            .ignoresSafeArea(edges: .bottom)
+            .ignoresSafeArea(.all, edges: .bottom)
 
             Dock(selection: $tab, showing: showing, dock: dock)
         }
+
         .environment(\.dockState, dock)
-        // Ask to allow notifications once you're in, and open the tab a tapped one points to.
-        .task { await Push.requestPermission() }
+        // Ask to allow notifications once you're in, then location; open the tab a tapped
+        // notification points to.
+        .task {
+            await Push.requestPermission()
+            LocationTracker.shared.requestPermission()
+        }
+        // Record the walk route only while the Walk tab is on screen and the app is open.
+        .onChange(of: tab == .walk && scenePhase == .active, initial: true) { _, walking in
+            LocationTracker.shared.setRecording(walking)
+        }
         .onReceive(PushRouter.shared.$openTab) { target in
             guard let target else { return }
-            withAnimation(.snappy) { tab = target }
+            if target == .friends { inbox.open() } else { withAnimation(.snappy) { tab = target } }
             PushRouter.shared.openTab = nil
+        }
+        .onReceive(PushRouter.shared.$openChat) { uid in
+            guard let uid else { return }
+            inbox.open(uid)
+            PushRouter.shared.openChat = nil
         }
         .background(Color(.systemBackground))
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -100,16 +125,32 @@ struct MainView: View {
                 Circle()
                     .frame(width: 6.5, height: 6.5)
                     .alignmentGuide(.lastTextBaseline) { d in d[.bottom] }
+                    .accessibilityHidden(true)
                 Spacer()
+                MessagesButton()
+                    .alignmentGuide(.lastTextBaseline) { d in d[VerticalAlignment.center] + 8 }
             }
             .foregroundStyle(.white)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("cablgram")
             .padding(.horizontal, 16)
             .padding(.top, 2)
             .padding(.bottom, 10)
             .background(Color.brand.ignoresSafeArea(edges: .top))
         }
+        // Messages slides in over the whole screen (the pink bar too) from the right, like
+        // Instagram's DMs: its own header shows who you're talking to. Pink stays behind the
+        // clock so the white status bar stays readable.
+        .overlay {
+            if inbox.isOpen {
+                MessagesView()
+                    .background(Color(.systemBackground).ignoresSafeArea(edges: .bottom))
+                    .background(alignment: .top) {
+                        Color.brand.frame(height: 0).ignoresSafeArea(edges: .top)
+                    }
+                    .transition(.move(edge: .trailing))
+                    .zIndex(1)
+            }
+        }
+        .animation(.snappy(duration: 0.32), value: inbox.isOpen)
         .onChange(of: tab) { _, new in
             if showing != new { showing = new }
         }
@@ -120,6 +161,10 @@ struct MainView: View {
         // Step and leaderboard syncing lives in its own invisible view, so
         // new step counts don't redraw every page.
         .background(StepSync())
+        .background(FriendsSync())
+        .environmentObject(friends)
+        .environment(eggs)
+        .environment(inbox)
     }
 }
 
@@ -131,12 +176,22 @@ private struct Dock: View {
     /// The page on screen right now (follows a swipe as it happens).
     var showing: AppTab
     @EnvironmentObject private var auth: AuthStore
+    @Environment(InboxStore.self) private var inbox: InboxStore?
+    @EnvironmentObject private var friends: FriendsStore
     @ObservedObject var dock: DockState
     @Namespace private var pill
 
+    /// Unread messages plus friend requests waiting for you.
+    private var messagesBadge: Int {
+        (inbox?.unreadTotal ?? 0) + friends.requests.count
+    }
+
+    /// The dock never hides now that Messages opens over it.
+    private var hidden: Bool { false }
+
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(AppTab.allCases) { tab in
+            ForEach(AppTab.allCases.filter { $0 != .friends }) { tab in
                 let isSelected = tab == showing
                 Button {
                     guard selection != tab || showing != tab else { return }
@@ -156,6 +211,7 @@ private struct Dock: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(tab == .menu ? "Your profile" : tab.title)
+                .accessibilityValue(tab == .friends && messagesBadge > 0 ? "\(messagesBadge) new" : "")
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
@@ -163,9 +219,13 @@ private struct Dock: View {
         .modifier(GlassDock())
         // Smaller and narrower while scrolling, like Instagram's.
         .padding(.horizontal, dock.compact ? 64 : 22)
-        // Sits low, close to the bottom edge.
-        .offset(y: 16)
+        // Sits low, close to the bottom edge; slides away inside a chat.
+        .offset(y: hidden ? 140 : 16)
+        .opacity(hidden ? 0 : 1)
+        .allowsHitTesting(!hidden)
+        .accessibilityHidden(hidden)
         .animation(.snappy(duration: 0.3), value: showing)
+        .animation(.snappy(duration: 0.3), value: hidden)
     }
 
     @ViewBuilder
@@ -178,6 +238,13 @@ private struct Dock: View {
         } else {
             DockIcon(kind: tab.dockIcon, selected: selected,
                      color: selected ? Color.brand : .black, size: 26)
+                .overlay(alignment: .topTrailing) {
+                    if tab == .friends {
+                        UnreadBadge(count: messagesBadge)
+                            .offset(x: 9, y: -6)
+                            .animation(.spring(response: 0.35, dampingFraction: 0.6), value: messagesBadge)
+                    }
+                }
                 .scaleEffect((selected ? 1.06 : 1) * (dock.compact ? 0.84 : 1))
         }
     }
@@ -243,7 +310,8 @@ private extension View {
 }
 
 /// Keeps steps and the leaderboard in sync: starts step counting, uploads
-/// your totals when they change, and adopts steps spent on other devices.
+/// this phone's Health days when they change (the server then recalculates
+/// your totals), and adopts steps spent on other devices.
 private struct StepSync: View {
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var steps: StepStore
@@ -253,26 +321,64 @@ private struct StepSync: View {
         Color.clear
         .task { await steps.start() }
         .task(id: auth.user?.uid) {
+            steps.setUser(auth.user?.uid)
             if auth.user != nil {
                 leaderboard.startListening()
-                leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
+                sync()
             } else {
                 leaderboard.stopListening()
+                showYourSteps()
             }
         }
-        .onChange(of: steps.totalSteps) { _, _ in
-            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
-        }
-        .onChange(of: steps.stepsThisWeek) { _, _ in
-            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
-        }
-        .onChange(of: steps.spentSteps) { _, _ in
-            leaderboard.upload(totalSteps: steps.totalSteps, weekSteps: steps.stepsThisWeek, spentSteps: steps.spentSteps)
-        }
+        .onChange(of: steps.stepsSinceJoining) { _, _ in sync() }
+        .onChange(of: steps.localWeek) { _, _ in sync() }
+        .onChange(of: steps.dailySteps) { _, _ in sync() }
+        .onChange(of: steps.spentSteps) { _, _ in sync() }
+        .onChange(of: steps.goalReward?.id) { _, _ in sync() }
+        .onChange(of: steps.hasLoaded) { _, _ in sync() }
+        .onChange(of: steps.totalSteps) { _, _ in showYourSteps() }
+        .onChange(of: steps.stepsThisWeek) { _, _ in showYourSteps() }
         .onChange(of: leaderboard.entries) { _, entries in
             if let mine = entries.first(where: { $0.id == auth.user?.uid }) {
                 steps.adoptSpentSteps(mine.spentSteps)
             }
         }
+    }
+
+    /// Uploads (when anything changed) and refreshes your own leaderboard row.
+    private func sync() {
+        leaderboard.upload(steps)
+        showYourSteps()
+    }
+
+    private func showYourSteps() {
+        leaderboard.showYourSteps(uid: auth.user?.uid, total: steps.totalSteps, week: steps.stepsThisWeek)
+    }
+}
+
+/// Top-right of the pink bar: opens Messages (friends and chats), with a badge for unread
+/// messages plus friend requests, like Instagram's messages button.
+private struct MessagesButton: View {
+    @Environment(InboxStore.self) private var inbox
+    @EnvironmentObject private var friends: FriendsStore
+
+    var body: some View {
+        let count = inbox.unreadTotal + friends.requests.count
+        Button {
+            Haptics.tap()
+            inbox.open()
+        } label: {
+            DockIcon(kind: .people, selected: false, color: .white, size: 26)
+                .frame(width: 40, height: 36)
+                .overlay(alignment: .topTrailing) {
+                    UnreadBadge(count: count)
+                        .overlay(Capsule().stroke(Color.brand, lineWidth: 1.5))
+                        .offset(x: 4, y: -2)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .animation(.spring(response: 0.35, dampingFraction: 0.6), value: count)
+        .accessibilityLabel(count > 0 ? "Messages, \(count) new" : "Messages")
     }
 }
