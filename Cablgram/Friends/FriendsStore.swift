@@ -34,7 +34,7 @@ struct FriendWalker: Equatable {
     var stepsThisWeek: Int { week == LeaderboardStore.weekKey ? weekSteps : 0 }
     /// Steps they can still spend on rewards.
     var availableSteps: Int { max(totalSteps - spentSteps, 0) }
-    var goalReward: Reward? { goal.flatMap { id in Reward.all.first { $0.id == id } } }
+    @MainActor var goalReward: Reward? { goal.flatMap { id in Reward.all.first { $0.id == id } } }
 }
 
 /// Someone found by phone number, and where you stand with them.

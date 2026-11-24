@@ -10,7 +10,11 @@ struct MenuView: View {
     #if DEBUG
     #endif
 
-    private var claimed: [Reward] { Reward.all.filter(steps.isClaimed) }
+    @ObservedObject private var rewardStore = RewardStore.shared
+    /// Your claims (newest first) and the reward each is for, when it still exists.
+    private var claimed: [(claim: RewardClaim, reward: Reward?)] {
+        rewardStore.history.map { claim in (claim, rewardStore.rewards.first { $0.id == claim.rewardID }) }
+    }
 
     var body: some View {
         ScrollView {
@@ -31,20 +35,34 @@ struct MenuView: View {
                 HStack(spacing: 12) {
                     stat(steps.totalSteps.formatted(), "Total steps")
                     stat(steps.stepsThisWeek.formatted(), "This week")
-                    stat("\(claimed.count)", "Rewards")
+                    stat("\(claimed.filter { $0.claim.status != .rejected }.count)", "Rewards")
                 }
 
                 if !claimed.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Your rewards").font(.headline)
-                        ForEach(claimed) { reward in
+                        ForEach(claimed, id: \.claim.id) { item in
                             HStack(spacing: 12) {
-                                RewardImage(reward: reward)
-                                    .frame(width: 44, height: 44)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                Text(reward.fullName).font(.subheadline.weight(.semibold))
+                                Group {
+                                    if let reward = item.reward {
+                                        RewardImage(reward: reward)
+                                    } else {
+                                        ZStack {
+                                            Color(.secondarySystemBackground)
+                                            Image(systemName: "gift.fill").foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                                .frame(width: 44, height: 44)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.reward?.fullName ?? item.claim.rewardName).font(.subheadline.weight(.semibold))
+                                    if let message = item.claim.message {
+                                        Text(message).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
                                 Spacer()
-                                Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                                ClaimStatusLabel(status: item.claim.status)
                             }
                         }
                     }

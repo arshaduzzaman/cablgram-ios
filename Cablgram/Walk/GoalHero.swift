@@ -112,18 +112,29 @@ struct GoalHero: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("You walked enough for it! 🎉")
                 .font(.title2.weight(.bold))
-            Button {
-                Haptics.celebrate()
-                onClaim(goal)
-            } label: {
-                Text("Claim \(goal.title)")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 52)
-                    .background(Color.brand, in: Capsule())
+            if let message = steps.claim(for: goal)?.message, steps.claim(for: goal)?.status == .rejected {
+                Text("Not approved: \(message)")
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
             }
-            .buttonStyle(.plain)
+            if goal.soldOut {
+                Text("Sorry, every \(goal.title) has been claimed. Pick another reward.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                Button {
+                    Haptics.press()
+                    onClaim(goal)
+                } label: {
+                    Text(steps.claim(for: goal)?.status == .rejected ? "Claim \(goal.title) again" : "Claim \(goal.title)")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(Color.brand, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 

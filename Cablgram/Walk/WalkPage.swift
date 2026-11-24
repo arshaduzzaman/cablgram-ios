@@ -12,6 +12,8 @@ struct WalkPage: View {
     @State private var showingLeaderboard = false
     @State private var showingGoalPicker = false
     @StateObject private var chat = RaceChatStore()
+    /// The reward whose claim sheet is open.
+    @State private var claiming: Reward?
     @State private var justClaimed: Reward?
     /// Set just after the first step count arrives, so opening the app
     /// doesn't buzz for rewards or goals that were already reached.
@@ -107,10 +109,16 @@ struct WalkPage: View {
                 .environmentObject(steps)
                 .presentationDetents([.medium, .large])
         }
+        .sheet(item: $claiming) { reward in
+            ClaimSheet(reward: reward) { justClaimed = $0 }
+                .environmentObject(auth)
+                .tint(.brand)
+                .presentationDetents([.large])
+        }
         .alert(item: $justClaimed) { reward in
             Alert(
-                title: Text("You earned it! 🎉"),
-                message: Text("\(reward.fullName) is yours. You walked \(reward.steps.formatted()) steps for it."),
+                title: Text("Claim sent 🎉"),
+                message: Text("You walked \(reward.steps.formatted()) steps for \(reward.fullName). We'll review your claim and let you know."),
                 dismissButton: .default(Text("Nice"))
             )
         }
@@ -168,7 +176,7 @@ struct WalkPage: View {
                     RewardCard(reward: reward) { claim(reward) }
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            guard !steps.isClaimed(reward), reward.id != steps.goalReward?.id else { return }
+                            guard !steps.isClaimed(reward), !reward.soldOut, reward.id != steps.goalReward?.id else { return }
                             Haptics.select()
                             withAnimation(.snappy) { steps.setGoal(reward) }
                         }
@@ -211,8 +219,7 @@ struct WalkPage: View {
     // MARK: - Helpers
 
     private func claim(_ reward: Reward) {
-        steps.claim(reward)
-        justClaimed = reward
+        claiming = reward
     }
 
     #if DEBUG

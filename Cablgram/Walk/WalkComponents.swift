@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// One reward as a flat row: photo, name, progress, and Claim when unlocked.
+/// One reward as a flat row: photo, name, progress, and Claim when unlocked
+/// (or your claim's status once sent).
 struct RewardCard: View {
     @EnvironmentObject private var steps: StepStore
     let reward: Reward
@@ -9,6 +10,7 @@ struct RewardCard: View {
     var body: some View {
         let unlocked = steps.isUnlocked(reward)
         let claimed = steps.isClaimed(reward)
+        let claim = steps.claim(for: reward)
 
         HStack(spacing: 14) {
             RewardImage(reward: reward)
@@ -36,20 +38,28 @@ struct RewardCard: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                if let claim, claim.status != .pending, let message = claim.message {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(claim.status == .rejected ? .red : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Spacer(minLength: 4)
 
-            if claimed {
-                Text("Claimed")
+            if let claim, claimed {
+                ClaimStatusLabel(status: claim.status)
+            } else if reward.soldOut {
+                Text("All claimed")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
             } else if unlocked {
                 Button {
-                    Haptics.celebrate()
+                    Haptics.press()
                     onClaim()
                 } label: {
-                    Text("Claim")
+                    Text(claim?.status == .rejected ? "Claim again" : "Claim")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
@@ -64,5 +74,35 @@ struct RewardCard: View {
             }
         }
         .padding(.vertical, 12)
+    }
+}
+
+/// "Waiting for review", "Approved", "Delivered" or "Not approved", coloured to match.
+struct ClaimStatusLabel: View {
+    let status: RewardClaim.Status
+
+    var body: some View {
+        Label(status.label, systemImage: symbol)
+            .labelStyle(.titleAndIcon)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(color)
+            .multilineTextAlignment(.trailing)
+    }
+
+    private var symbol: String {
+        switch status {
+        case .pending: "clock"
+        case .approved: "checkmark.circle"
+        case .delivered: "checkmark.seal.fill"
+        case .rejected: "xmark.circle"
+        }
+    }
+
+    private var color: Color {
+        switch status {
+        case .pending: .orange
+        case .approved, .delivered: .green
+        case .rejected: .red
+        }
     }
 }

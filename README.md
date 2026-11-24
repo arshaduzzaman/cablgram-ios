@@ -3,7 +3,7 @@
 SwiftUI app. Everyone signs in with Google first. The layout follows the Facebook app: a "cablgram" bar on top, icon tabs under it.
 
 - **News** (home icon): the Cablgram posts (the same feed the website shows, read straight from the Nutshell API) as a Threads-style feed. Hold a photo and 🥚 Egg and ✍️ Headline pop up above your finger: slide onto 🥚 and let go to throw a rotten egg where you pressed (50 steps), or onto ✍️ to write a headline for the post (500+ steps; the most steps wins the spot above the photo). Spent steps come off reward progress, not the leaderboard. Eggs and headlines are shared through Firestore (`newsPosts/{postId}`).
-- **Walk**: everything about walking on one scrolling page: the reward you picked and steps to go, a race to it against other walkers, a Start a walk button for a live walk on the map, a leaderboard preview with "See all", and rewards. Uncle Bobo's Chicken (10,000), Liberty Pizza Slice and Smashed Chicken Burger (15,000), GTA 6 (75,000) and PlayStation 5 (500,000). Edit the list in `Cablgram/Walk/Rewards.swift`.
+- **Walk**: everything about walking on one scrolling page: the reward you picked and steps to go, a race to it against other walkers, a Start a walk button for a live walk on the map, a leaderboard preview with "See all", and rewards. Rewards are edited on the admin dashboard (Rewards page) and update live; until any are set up there the app shows the built-in list in `Cablgram/Walk/Rewards.swift`. Claiming sends the claim to the server (cablgram-admin `/api/rewards/claim`, which recounts steps); an admin approves, rejects or marks it delivered on the Claims page, and the card shows its status.
 - **Discover** (ticket icon): events on now and coming up in Bangladesh from two ticket sites, merged by date: [tickify.live](https://tickify.live) (read from its public events page) and [quicket.me](https://quicket.me) (read from the JSON API its website uses, `api.quicket.me/v2/events`). Featured banners from both sites, category chips, and each event's poster, dates, venue, price and a small Tickify/Quicket tag. Tapping one opens its page on that site to get tickets. Code in `Cablgram/Discover/`.
 - **Menu**: your profile, stats, claimed rewards, a Haptics switch and sign out.
 
@@ -57,9 +57,6 @@ The Simulator has no real steps, so debug builds include buttons to add test ste
 
 To run on a real iPhone, choose your team under **Signing & Capabilities**. HealthKit is already turned on in `Cablgram.entitlements`.
 
-## Not built yet
-
-- Claiming a reward is only saved on the phone. Delivering real prizes needs server-side step checks (to stop cheating) and voucher or shipping details for partners.
 
 ## TestFlight (Xcode Cloud)
 

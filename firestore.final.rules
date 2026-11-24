@@ -117,6 +117,17 @@ service cloud.firestore {
     }
 
     // Sent-notification history: dashboard only (Admin SDK), never the apps.
+    // Rewards are edited on the dashboard (cablgram-admin → Rewards); the apps only read them.
+    match /rewards/{rewardId} {
+      allow read: if request.auth != null;
+    }
+
+    // Reward claims: sent through cablgram-admin /api/rewards/claim (which checks steps)
+    // and reviewed on the dashboard. You can read your own; only the server writes.
+    match /rewardClaims/{claimId} {
+      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+    }
+
     match /pushLog/{id} {
       allow read, write: if false;
     }

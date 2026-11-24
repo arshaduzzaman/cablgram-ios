@@ -322,6 +322,7 @@ private struct StepSync: View {
         .task { await steps.start() }
         .task(id: auth.user?.uid) {
             steps.setUser(auth.user?.uid)
+            RewardStore.shared.start(uid: auth.user?.uid)
             if auth.user != nil {
                 leaderboard.startListening()
                 sync()
