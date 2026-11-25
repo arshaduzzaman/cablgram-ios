@@ -75,7 +75,7 @@ final class LeaderboardStore: ObservableObject {
         let week: String
     }
 
-    nonisolated private static let recalcURL = URL(string: "https://cablgram-admin.vercel.app/api/steps/recalc")!
+    nonisolated private static let recalcURL = Backend.url("/api/steps/recalc")
 
     /// Random ID for this install, made once. Names this phone's doc under `devices`.
     nonisolated static var deviceID: String {

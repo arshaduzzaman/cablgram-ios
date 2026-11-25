@@ -62,7 +62,7 @@ final class FriendsStore: ObservableObject {
     private var listListener: ListenerRegistration?
     private var walkerListeners: [String: ListenerRegistration] = [:]
 
-    private static let url = URL(string: "https://cablgram-admin.vercel.app/api/friends")!
+    private static let url = Backend.url("/api/friends")
 
     var requests: [FriendLink] { links.filter { $0.status == .received }.sorted { $0.name < $1.name } }
     var sent: [FriendLink] { links.filter { $0.status == .sent }.sorted { $0.name < $1.name } }

@@ -42,7 +42,7 @@ final class RewardStore: ObservableObject {
     private var claimsListener: ListenerRegistration?
     private var uid: String?
 
-    private static let claimURL = URL(string: "https://cablgram-admin.vercel.app/api/rewards/claim")!
+    private static let claimURL = Backend.url("/api/rewards/claim")
 
     /// Listens for the signed-in user (rules only let signed-in people read), and stops on sign-out.
     func start(uid: String?) {
