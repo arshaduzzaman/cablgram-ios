@@ -112,7 +112,8 @@ final class LeaderboardStore: ObservableObject {
                         week: data["week"] as? String ?? "",
                         spentSteps: (data["spentSteps"] as? NSNumber)?.intValue ?? 0,
                         test: data["test"] as? Bool ?? false,
-                        updatedAt: (data["updatedAt"] as? Timestamp)?.dateValue()
+                        // When their phone last sent steps: the server's note or the app's own write, whichever is newer.
+                        updatedAt: [data["stepsAt"], data["updatedAt"]].compactMap { ($0 as? Timestamp)?.dateValue() }.max()
                     )
                 }
                 let message = error?.localizedDescription
