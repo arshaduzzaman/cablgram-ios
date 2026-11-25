@@ -1,5 +1,6 @@
 import Foundation
 import HealthKit
+import CoreMotion
 import UIKit
 import FirebaseAuth
 
@@ -34,6 +35,40 @@ enum HealthDays {
             days[key(for: statistics.startDate)] = Int(steps)
         }
         return days
+    }
+
+    /// Today's steps on the iPhone's motion chip (works with the phone locked, unlike Health).
+    /// `nil` if Motion & Fitness isn't allowed. Never asks for it.
+    static func chipToday() async -> Int? {
+        guard CMPedometer.isStepCountingAvailable(), CMPedometer.authorizationStatus() == .authorized else { return nil }
+        let pedometer = CMPedometer()
+        return await withCheckedContinuation { done in
+            pedometer.queryPedometerData(from: Calendar.current.startOfDay(for: .now), to: .now) { data, _ in
+                done.resume(returning: data?.numberOfSteps.intValue)
+            }
+        }
+    }
+
+    /// Health's days with today raised to the motion chip's count (or the highest sent
+    /// today) when that's more, so a send never lowers today's steps.
+    static func withChip(_ days: [String: Int], chip: Int?) -> [String: Int] {
+        var days = days
+        let today = key(for: .now)
+        let best = max(days[today] ?? 0, chip ?? 0, highestSent(today))
+        if best > 0 { days[today] = best }
+        noteSent(today, best)
+        return days
+    }
+
+    /// The highest count sent for today from this phone, so neither the app nor a
+    /// background send ever lowers it (Health alone is often behind the motion chip).
+    private static func highestSent(_ day: String) -> Int {
+        let saved = UserDefaults.standard.dictionary(forKey: "walk.sentToday") as? [String: Int]
+        return saved?[day] ?? 0
+    }
+
+    private static func noteSent(_ day: String, _ steps: Int) {
+        UserDefaults.standard.set([day: steps], forKey: "walk.sentToday")
     }
 
     /// A local calendar day's key, "yyyy-MM-dd".
@@ -86,7 +121,8 @@ enum BackgroundSteps {
         let task = UIApplication.shared.beginBackgroundTask(withName: "steps")
         defer { if task != .invalid { UIApplication.shared.endBackgroundTask(task) } }
 
-        let days = await HealthDays.fetch(from: health, joinDate: joinDate)
+        let days = HealthDays.withChip(await HealthDays.fetch(from: health, joinDate: joinDate),
+                                       chip: await HealthDays.chipToday())
         guard !days.isEmpty else { return }
         do {
             try await LeaderboardStore.saveDevice(uid: uid, days: days)

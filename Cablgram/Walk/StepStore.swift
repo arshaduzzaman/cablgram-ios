@@ -220,6 +220,9 @@ final class StepStore: ObservableObject {
         healthWeek = await sumOfSteps(from: startOfWeek)
         healthDays = await stepsPerDay()
         startLiveSteps()
+        // Don't wait for the live updates' first answer: read the motion chip now, so
+        // the count sent on opening isn't Health's alone (which is often behind).
+        if let chip = await HealthDays.chipToday(), chip > pedometerToday { pedometerToday = chip }
         applyCounts()
         hasLoaded = true
     }
@@ -229,9 +232,9 @@ final class StepStore: ObservableObject {
     private func applyCounts() {
         let today = HealthDays.key(for: .now)
         let healthToday = healthDays[today] ?? 0
-        let extra = max(0, pedometerToday - healthToday)
-        var days = healthDays
-        if extra > 0 { days[today] = pedometerToday }
+        // Health, the motion chip, or the most this phone has already sent today: whichever is highest.
+        let days = HealthDays.withChip(healthDays, chip: pedometerToday)
+        let extra = max(0, (days[today] ?? 0) - healthToday)
         if stepsSinceJoining != healthTotal + extra { stepsSinceJoining = healthTotal + extra }
         if localWeek != healthWeek + extra { localWeek = healthWeek + extra }
         if days != dailySteps { dailySteps = days }
