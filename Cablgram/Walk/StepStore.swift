@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import HealthKit
+import CoreMotion
 
 /// Reads step counts from Apple Health. Rewards and your claims come from `RewardStore`.
 ///
@@ -33,6 +34,16 @@ final class StepStore: ObservableObject {
     private let stepType = HKQuantityType(.stepCount)
     private let defaults = UserDefaults.standard
     private var observer: HKObserverQuery?
+    /// Counts today's steps live from the motion chip while the app is open. Health only
+    /// gets the iPhone's steps every few minutes, which is too slow for a race.
+    private let pedometer = CMPedometer()
+    private var pedometerDay: Date?
+    /// Today's steps from the motion chip (iPhone only, no Watch).
+    @Published private(set) var pedometerToday = 0
+    /// Health's own counts from the last refresh, before today's live steps are added.
+    private var healthTotal = 0
+    private var healthWeek = 0
+    private var healthDays: [String: Int] = [:]
     private var syncUID: String?
     /// Re-renders views that read rewards or claims through this store when either changes.
     private var rewardChanges: AnyCancellable?
@@ -198,20 +209,98 @@ final class StepStore: ObservableObject {
         }
         await refresh()
         observeNewSteps()
+        startLiveSteps()
     }
 
     func refresh() async {
         guard access == .ready else { return }
         let startOfWeek = Calendar.current.dateInterval(of: .weekOfYear, for: .now)?.start
             ?? Calendar.current.startOfDay(for: .now)
-        let total = await sumOfSteps(from: joinDate)
-        let week = await sumOfSteps(from: startOfWeek)
-        let days = await stepsPerDay()
-        // Set together so one change means one upload.
-        stepsSinceJoining = total
-        localWeek = week
-        if days != dailySteps { dailySteps = days }
+        healthTotal = await sumOfSteps(from: joinDate)
+        healthWeek = await sumOfSteps(from: startOfWeek)
+        healthDays = await stepsPerDay()
+        startLiveSteps()
+        applyCounts()
         hasLoaded = true
+    }
+
+    /// Health's counts, topped up with today's live steps when the motion chip is ahead
+    /// of Health (it usually is while you walk). Set together so one change means one upload.
+    private func applyCounts() {
+        let today = HealthDays.key(for: .now)
+        let healthToday = healthDays[today] ?? 0
+        let extra = max(0, pedometerToday - healthToday)
+        var days = healthDays
+        if extra > 0 { days[today] = pedometerToday }
+        if stepsSinceJoining != healthTotal + extra { stepsSinceJoining = healthTotal + extra }
+        if localWeek != healthWeek + extra { localWeek = healthWeek + extra }
+        if days != dailySteps { dailySteps = days }
+    }
+
+    /// Follows today's steps on the motion chip, every few seconds while you walk.
+    /// Restarts at midnight. Does nothing if Motion & Fitness is off.
+    private func startLiveSteps() {
+        guard CMPedometer.isStepCountingAvailable(), CMPedometer.authorizationStatus() != .denied else { return }
+        let today = Calendar.current.startOfDay(for: .now)
+        guard pedometerDay != today else { return }
+        pedometer.stopUpdates()
+        pedometerDay = today
+        pedometerToday = 0
+        pedometer.startUpdates(from: today) { [weak self] data, _ in
+            guard let steps = data?.numberOfSteps.intValue else { return }
+            Task { @MainActor in
+                guard let self, self.pedometerDay == today else { return }
+                if Calendar.current.startOfDay(for: .now) != today {
+                    // A new day: count from midnight again.
+                    await self.refresh()
+                    return
+                }
+                guard steps != self.pedometerToday else { return }
+                self.pedometerToday = steps
+                self.applyCounts()
+            }
+        }
+    }
+
+    // MARK: - Setup check
+
+    /// Whether step counting really works, for the setup screen.
+    enum Check: Equatable {
+        /// Health has steps from the past week: all good.
+        case working
+        /// The motion chip counts steps but Health gives Cablgram none: Steps is off for
+        /// Cablgram in Health (or Health hasn't got them yet).
+        case healthOff
+        /// Motion & Fitness is off for Cablgram.
+        case motionOff
+        /// No steps anywhere yet (a new phone, or Fitness Tracking is off).
+        case noSteps
+        /// No Health on this device.
+        case unavailable
+    }
+
+    /// Asks for Health access if needed, then looks for steps in Health and on the motion chip.
+    func check() async -> Check {
+        if access == .notRequested { await start() }
+        guard access == .ready else { return .unavailable }
+        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: .now) ?? .now
+        if await sumOfSteps(from: weekAgo) > 0 {
+            await refresh()
+            return .working
+        }
+        guard CMPedometer.isStepCountingAvailable() else { return .noSteps }
+        if CMPedometer.authorizationStatus() == .denied || CMPedometer.authorizationStatus() == .restricted {
+            return .motionOff
+        }
+        // Also asks for Motion & Fitness the first time.
+        let chipSteps = await withCheckedContinuation { (done: CheckedContinuation<Int, Never>) in
+            pedometer.queryPedometerData(from: weekAgo, to: .now) { data, _ in
+                done.resume(returning: data?.numberOfSteps.intValue ?? 0)
+            }
+        }
+        if CMPedometer.authorizationStatus() == .denied { return .motionOff }
+        startLiveSteps()
+        return chipSteps > 0 ? .healthOff : .noSteps
     }
 
     /// Steps typed in by hand in the Health app don't count, only ones the

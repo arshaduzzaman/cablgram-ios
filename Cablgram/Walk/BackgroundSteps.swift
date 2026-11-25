@@ -28,17 +28,23 @@ enum HealthDays {
             intervalComponents: DateComponents(day: 1)
         )
         guard let collection = try? await descriptor.result(for: health) else { return [:] }
+        var days: [String: Int] = [:]
+        collection.enumerateStatistics(from: start, to: .now) { statistics, _ in
+            let steps = statistics.sumQuantity()?.doubleValue(for: .count()) ?? 0
+            days[key(for: statistics.startDate)] = Int(steps)
+        }
+        return days
+    }
+
+    /// A local calendar day's key, "yyyy-MM-dd".
+    static func key(for date: Date) -> String {
+        let calendar = Calendar.current
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        var days: [String: Int] = [:]
-        collection.enumerateStatistics(from: start, to: .now) { statistics, _ in
-            let steps = statistics.sumQuantity()?.doubleValue(for: .count()) ?? 0
-            days[formatter.string(from: statistics.startDate)] = Int(steps)
-        }
-        return days
+        return formatter.string(from: date)
     }
 }
 

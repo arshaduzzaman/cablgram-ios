@@ -128,7 +128,7 @@ struct RaceTrack: View {
                     .contentTransition(.numericText(value: Double(left)))
                 Text("steps away")
                     .lineLimit(1)
-                // Others' totals arrive every 15-30 minutes: show how fresh the leader's is.
+                // Others' totals are live while their app is open, hourly-ish when closed: show how fresh the leader's is.
                 if let ago = Self.updatedAgo(leader.updatedAt) {
                     Text("· \(ago)")
                         .font(.caption)

@@ -9,6 +9,10 @@ struct CablgramApp: App {
     @StateObject private var auth: AuthStore
     @StateObject private var steps = StepStore()
     @StateObject private var leaderboard = LeaderboardStore()
+    /// The step check on `StepSetupView` passed once on this phone.
+    @AppStorage("setup.stepsChecked") private var stepsChecked = false
+    /// "Not now" on the step check: asked again next launch.
+    @State private var skippedStepCheck = false
 
     init() {
         // Firebase is set up in AppDelegate.didFinishLaunching, not here: this runs before
@@ -31,6 +35,9 @@ struct CablgramApp: App {
                     }
                 } else if auth.needsProfile {
                     ProfileGateView()
+                } else if !stepsChecked && !skippedStepCheck {
+                    StepSetupView(onDone: { withAnimation { stepsChecked = true } },
+                                  onSkip: { withAnimation { skippedStepCheck = true } })
                 } else {
                     MainView()
                 }

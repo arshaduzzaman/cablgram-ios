@@ -11,6 +11,8 @@ struct NewsView: View {
     @EnvironmentObject private var steps: StepStore
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var leaderboard: LeaderboardStore
+    /// You've thrown an egg, so the how-to-throw demo stays hidden.
+    @AppStorage("tips.eggThrown") private var eggTipDone = false
     @StateObject private var feed = NewsFeed()
     @StateObject private var social = NewsSocial()
     /// Posts currently on screen; only these are listened to. Not state:
@@ -55,7 +57,11 @@ struct NewsView: View {
                             myPhotoURL: auth.user?.photoURL,
                             availableSteps: steps.availableSteps,
                             spend: { amount in steps.spend(amount) },
-                            onThrowEgg: { spot in social.throwEgg(at: spot, on: post.id) },
+                            showsThrowTip: !eggTipDone && post.id == feed.posts.first?.id,
+                            onThrowEgg: { spot in
+                                eggTipDone = true
+                                return social.throwEgg(at: spot, on: post.id)
+                            },
                             onHeadline: { text, amount in
                                 social.postHeadline(text, steps: amount, by: auth.displayName, on: post.id)
                             })
@@ -345,6 +351,7 @@ private struct PostRow: View, Equatable {
         a.post == b.post && a.eggs == b.eggs && a.faces == b.faces && a.headlines == b.headlines
             && a.myID == b.myID && a.lovers == b.lovers && a.myLoveKey == b.myLoveKey
             && a.myName == b.myName && a.myPhotoURL == b.myPhotoURL && a.availableSteps == b.availableSteps
+            && a.showsThrowTip == b.showsThrowTip
     }
 
     let post: NewsPost
@@ -362,6 +369,8 @@ private struct PostRow: View, Equatable {
     let availableSteps: Int
     /// Spends steps; returns whether there were enough.
     let spend: (Int) -> Bool
+    /// Shows how to throw an egg over the photo (the first post, until your first throw).
+    let showsThrowTip: Bool
     let onThrowEgg: (CGPoint) -> String
     let onHeadline: (String, Int) -> Void
 
@@ -499,6 +508,11 @@ private struct PostRow: View, Equatable {
                         throwerMarkers.opacity(splatsHidden ? 0 : 1).allowsHitTesting(!splatsHidden)
                     }
                     .overlay { loveBurstView }
+                    .overlay {
+                        if showsThrowTip && mode == .idle {
+                            EggThrowTip().transition(.opacity)
+                        }
+                    }
                     .overlay { holdOverlay }
                     .animation(.easeInOut(duration: 0.25), value: splatsHidden)
             } else {

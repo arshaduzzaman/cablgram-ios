@@ -28,7 +28,8 @@ struct Racer: Identifiable, Equatable {
     let steps: Int
     let isYou: Bool
     let finished: Bool
-    /// When their phone last sent steps. Totals arrive every 15-30 minutes.
+    /// When their phone last sent steps: every 20 seconds while they walk with the app
+    /// open, about hourly when it's closed.
     var updatedAt: Date? = nil
 
     var firstName: String { name.components(separatedBy: " ").first ?? name }
@@ -49,6 +50,11 @@ final class LeaderboardStore: ObservableObject {
 
     private var listener: ListenerRegistration?
     private var lastUploaded: Upload?
+    /// When steps were last sent, and a send waiting for the gap to pass.
+    private var lastSent = Date.distantPast
+    private var pendingSend: Task<Void, Never>?
+    /// Live steps change every few seconds while walking; send at most this often.
+    private static let minGap: TimeInterval = 20
     /// Counts recalc requests so only the newest answer is used.
     private var recalcCount = 0
 
@@ -128,6 +134,30 @@ final class LeaderboardStore: ObservableObject {
     /// The server's answer goes back to `steps`; failures are ignored (the
     /// server also recalculates everyone daily).
     func upload(_ steps: StepStore) {
+        let wait = Self.minGap - Date.now.timeIntervalSince(lastSent)
+        guard wait <= 0 else {
+            // Sends the newest counts once the gap has passed.
+            if pendingSend == nil {
+                pendingSend = Task { [weak self, weak steps] in
+                    try? await Task.sleep(for: .seconds(wait))
+                    guard !Task.isCancelled, let self, let steps else { return }
+                    self.pendingSend = nil
+                    self.upload(steps)
+                }
+            }
+            return
+        }
+        send(steps)
+    }
+
+    /// Sends anything waiting right away (when the app goes to the background).
+    func flush(_ steps: StepStore) {
+        pendingSend?.cancel()
+        pendingSend = nil
+        send(steps)
+    }
+
+    private func send(_ steps: StepStore) {
         guard AuthStore.isConfigured, let user = Auth.auth().currentUser else { return }
         // Until Health has answered there are no real days to send.
         let days = steps.access == .ready && steps.hasLoaded ? steps.dailySteps : nil
@@ -135,6 +165,7 @@ final class LeaderboardStore: ObservableObject {
                             spent: steps.spentSteps, goal: steps.goalReward?.id, days: days)
         if upload == lastUploaded { return }
         lastUploaded = upload
+        lastSent = .now
 
         var data: [String: Any] = [
             "name": user.displayName ?? "Walker",

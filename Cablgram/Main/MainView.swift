@@ -316,10 +316,15 @@ private struct StepSync: View {
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var steps: StepStore
     @EnvironmentObject private var leaderboard: LeaderboardStore
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Color.clear
         .task { await steps.start() }
+        // Don't leave the last live steps waiting when the app closes.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { leaderboard.flush(steps) }
+        }
         .task(id: auth.user?.uid) {
             steps.setUser(auth.user?.uid)
             RewardStore.shared.start(uid: auth.user?.uid)
