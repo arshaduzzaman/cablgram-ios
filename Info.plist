@@ -13,6 +13,10 @@
 			</array>
 		</dict>
 	</array>
+	<key>AdminBaseURL</key>
+	<string>$(ADMIN_BASE_URL)</string>
+	<key>AuthTestNumbersOnly</key>
+	<string>$(AUTH_TEST_NUMBERS_ONLY)</string>
 	<key>GoogleMapsAPIKey</key>
 	<string>$(GOOGLE_MAPS_API_KEY)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>

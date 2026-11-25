@@ -47,6 +47,10 @@ To turn on Google Maps:
 3. Copy `Secrets.example.xcconfig` to `Secrets.xcconfig` and paste the key. `Secrets.xcconfig` is git-ignored, so the key never lands on GitHub.
 4. Build and run.
 
+## Testing against a local dashboard
+
+Debug builds can use a dashboard (`cablgram-admin`, `npm run dev`) running on your Mac instead of the deployed one: set `ADMIN_BASE_URL` in `Secrets.xcconfig` (see `Secrets.example.xcconfig`). Release builds ignore it. The dashboard and `GoogleService-Info.plist` must be for the same Firebase project.
+
 ## Run it
 
 1. Install Xcode 16 or newer.

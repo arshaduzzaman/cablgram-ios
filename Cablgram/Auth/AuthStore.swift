@@ -18,6 +18,13 @@ final class AuthStore: ObservableObject {
     static func configureFirebase() {
         if isConfigured && FirebaseApp.app() == nil {
             FirebaseApp.configure()
+            #if DEBUG
+            // AUTH_TEST_NUMBERS_ONLY = YES in Secrets.xcconfig: skips the silent push / "not a robot"
+            // check so Firebase's test phone numbers sign in on the Simulator. Real numbers then fail.
+            if Backend.testNumbersOnly {
+                Auth.auth().settings?.isAppVerificationDisabledForTesting = true
+            }
+            #endif
         }
     }
 

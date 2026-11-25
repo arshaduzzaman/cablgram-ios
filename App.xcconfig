@@ -5,6 +5,12 @@
 // Without a key the app falls back to Apple Maps.
 GOOGLE_MAPS_API_KEY =
 
+// Debug builds only: a dashboard running on your Mac to use instead of the deployed one.
+// Leave empty here; set it in Secrets.xcconfig (see Secrets.example.xcconfig).
+ADMIN_BASE_URL =
+// Debug builds only: YES lets only Firebase's test phone numbers sign in (for the Simulator).
+AUTH_TEST_NUMBERS_ONLY = NO
+
 // Google Sign-In callback scheme: REVERSED_CLIENT_ID from GoogleService-Info.plist.
 GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.984186551907-9vagb2l8avod47off47ktq532d8fdpj1
 
