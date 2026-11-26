@@ -144,10 +144,18 @@ struct TimedRewardsSection: View {
                     VStack(spacing: 0) {
                         ForEach(offers, id: \.claimKey) { reward in
                             TimedRewardCard(reward: reward, now: timeline.date) { onClaim(reward) }
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    // A running one can be your goal, like any reward.
+                                    guard (reward.span?.end ?? "") >= RewardDays.key(timeline.date), !steps.isClaimed(reward),
+                                          !reward.soldOut, reward.claimKey != steps.goalReward?.claimKey else { return }
+                                    Haptics.select()
+                                    withAnimation(.snappy) { steps.setGoal(reward) }
+                                }
                                 .hairline(leading: reward.claimKey == offers.last?.claimKey ? 0 : 72)
                         }
                     }
-                    Text("Only steps walked in each period count. Claim by midday the day after it ends.")
+                    Text("Only steps walked in each period count, and claiming uses them up. Tap one to make it your goal. Claim by midday the day after it ends.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -165,8 +173,7 @@ struct TimedRewardsSection: View {
                 offer.span = span
                 if span.end >= today { return offer }
                 if steps.claim(for: offer) != nil { return offer }
-                let got = offer.progress(days: steps.rewardDays, today: today)
-                return got.done >= got.need && !offer.soldOut ? offer : nil
+                return steps.isUnlocked(offer) && !offer.soldOut ? offer : nil
             }
         }
         // Soonest to end first.
@@ -182,10 +189,11 @@ struct TimedRewardCard: View {
     let onClaim: () -> Void
 
     var body: some View {
-        let got = reward.progress(days: steps.rewardDays, today: RewardDays.key(now))
+        let got = steps.progress(toward: reward)
         let reached = got.done >= got.need
         let claim = steps.claim(for: reward)
         let claimed = steps.isClaimed(reward)
+        let isGoal = reward.claimKey == steps.goalReward?.claimKey && !claimed
 
         HStack(spacing: 14) {
             RewardImage(reward: reward)
@@ -196,7 +204,7 @@ struct TimedRewardCard: View {
                 Text(reward.fullName)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
-                Text(reward.periodName(at: now).uppercased())
+                Text((isGoal ? "Your goal · " + reward.periodName(at: now) : reward.periodName(at: now)).uppercased())
                     .font(.caption2.weight(.bold))
                     .tracking(0.5)
                     .foregroundStyle(Color.brand)
@@ -204,7 +212,7 @@ struct TimedRewardCard: View {
                     GradientProgressBar(fraction: Double(got.done) / Double(max(got.need, 1)))
                         .padding(.vertical, 3)
                 }
-                Text(amount(got))
+                Text(amount(got, done: reached || claimed))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -214,7 +222,7 @@ struct TimedRewardCard: View {
                         .foregroundStyle(claim.status == .rejected ? .red : .secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if !claimed {
-                    Text(got.missed ? "A day was missed, so this one is out of reach." : timeLeft)
+                    Text(got.missed ? "A day was missed, so this one is out of reach." : reward.timeLeft(at: now))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -250,18 +258,20 @@ struct TimedRewardCard: View {
         .padding(.vertical, 12)
     }
 
-    private func amount(_ got: (done: Int, need: Int, missed: Bool)) -> String {
+    private func amount(_ got: (done: Int, need: Int, missed: Bool), done: Bool) -> String {
         if reward.schedule?.everyDay == true {
             return "\(reward.steps.formatted()) steps a day · \(got.done) of \(got.need) days"
         }
-        return got.done >= got.need
+        return done
             ? "\(reward.steps.formatted()) steps"
             : "\(got.done.formatted()) of \(reward.steps.formatted()) steps"
     }
+}
 
+extension Reward {
     /// "Ends in 5 hr" while it runs, "Claim by 12:00 PM" once it's over.
-    private var timeLeft: String {
-        guard let span = reward.span else { return "" }
+    func timeLeft(at now: Date = .now) -> String {
+        guard let span else { return "" }
         let end = RewardDays.end(span)
         if now >= end {
             return "Claim by \(RewardDays.claimDeadline(span).formatted(date: .omitted, time: .shortened))"

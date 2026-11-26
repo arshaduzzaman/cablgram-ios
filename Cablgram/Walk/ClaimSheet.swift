@@ -17,6 +17,11 @@ struct ClaimSheet: View {
     private var trimmedAddress: String { address.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var canSend: Bool { !sending && (!reward.needsAddress || !trimmedAddress.isEmpty) }
 
+    private var cost: Int {
+        guard reward.schedule?.everyDay == true, let span = reward.span else { return reward.steps }
+        return reward.steps * RewardDays.count(span)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -39,6 +44,11 @@ struct ClaimSheet: View {
                     if let details = reward.details {
                         Text(details).font(.subheadline)
                     }
+
+                    // What it costs: the target, or the target for each day of an every-day reward.
+                    Text("Claiming uses **\(cost.formatted())** of your steps. You get them back if the claim isn't approved.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
 
                     Label {
                         Text(auth.phoneNumber.map { "We'll check your claim and contact you on **\($0)**." }
