@@ -5,7 +5,7 @@ import FirebaseFirestore
 import GoogleSignIn
 
 /// Sign-in through Firebase Auth (same Firebase project as the website): with a phone
-/// number and a texted code only. Accounts that linked Google before keep it, but
+/// number and a code texted by the Cablgram server (`/api/auth/phone`) only. Accounts that linked Google before keep it, but
 /// nobody signs in with Google any more (the SDK only stays to sign it out). Before
 /// using the app everyone also needs a name (always typed by hand), a verified phone
 /// number and a date of birth (`users/{uid}.dateOfBirth`), all changeable later in the
@@ -175,36 +175,65 @@ final class AuthStore: ObservableObject {
         return "+880" + digits
     }
 
-    /// Texts a code to `phone` (already normalized). Returns the id to verify it with.
+    /// Texts a code to `phone` (already normalized), through the Cablgram server (which sends
+    /// it with a Bangladeshi SMS provider; Firebase's own texts don't reach every operator).
+    /// Returns the id to verify it with: the number itself.
     func sendCode(to phone: String) async throws -> String {
         guard Self.isConfigured else { throw ProfileError.message("Sign-in isn't set up yet.") }
-        do {
-            return try await PhoneAuthProvider.provider().verifyPhoneNumber(phone, uiDelegate: nil)
-        } catch {
-            throw ProfileError.message(Self.friendly(error))
-        }
+        _ = try await Self.phoneRequest(["action": "send", "phone": phone], token: nil)
+        return phone
     }
 
-    /// Checks the texted code and signs in, adds or changes the number.
+    /// Checks the texted code on the server and signs in, adds or changes the number.
     func verify(code: String, id: String, use: PhoneUse) async throws {
-        let credential = PhoneAuthProvider.provider().credential(withVerificationID: id, verificationCode: code)
         do {
             switch use {
             case .signIn:
-                try await Auth.auth().signIn(with: credential)
-            case .link:
+                let reply = try await Self.phoneRequest(["action": "verify", "phone": id, "code": code, "use": "signIn"], token: nil)
+                guard let token = reply["token"] as? String else {
+                    throw ProfileError.message("Something went wrong. Try again.")
+                }
+                do {
+                    try await Auth.auth().signIn(withCustomToken: token)
+                } catch {
+                    throw ProfileError.message(Self.friendly(error))
+                }
+            case .link, .change:
                 guard let user else { return }
-                try await user.link(with: credential)
-            case .change:
-                guard let user else { return }
-                try await user.updatePhoneNumber(credential)
+                let token: String
+                do { token = try await user.getIDToken() } catch { throw ProfileError.message("No internet connection.") }
+                // The server puts the number on this account.
+                _ = try await Self.phoneRequest(
+                    ["action": "verify", "phone": id, "code": code, "use": use == .link ? "link" : "change"], token: token)
             }
             await reloadUser()
             Haptics.success()
         } catch {
             Haptics.error()
-            throw ProfileError.message(Self.friendly(error))
+            throw error
         }
+    }
+
+    /// POSTs to the server's phone sign-in. Throws a `ProfileError` with a sentence to show.
+    private static func phoneRequest(_ body: [String: Any], token: String?) async throws -> [String: Any] {
+        var request = URLRequest(url: Backend.url("/api/auth/phone"), timeoutInterval: 25)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let data: Data, response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch let error as URLError where error.code == .timedOut {
+            throw ProfileError.message("The server took too long. Try again.")
+        } catch {
+            throw ProfileError.message("No internet connection.")
+        }
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        guard (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0) else {
+            throw ProfileError.message(json["error"] as? String ?? "Something went wrong. Try again.")
+        }
+        return json
     }
 
     private static func friendly(_ error: Error) -> String {
