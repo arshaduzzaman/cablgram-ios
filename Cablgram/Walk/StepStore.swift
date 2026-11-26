@@ -2,6 +2,8 @@ import Foundation
 import Combine
 import HealthKit
 import CoreMotion
+import FirebaseAuth
+import FirebaseFirestore
 
 /// Reads step counts from Apple Health. Rewards and your claims come from `RewardStore`.
 ///
@@ -237,6 +239,8 @@ final class StepStore: ObservableObject {
         if let chip = await HealthDays.chipToday(), chip > pedometerToday { pedometerToday = chip }
         applyCounts()
         hasLoaded = true
+        // Skipping the setup screen is reported from there; this keeps the result current.
+        if defaults.bool(forKey: "setup.stepsChecked") { await report() }
     }
 
     /// Health's counts, topped up with today's live steps when the motion chip is ahead
@@ -316,6 +320,45 @@ final class StepStore: ObservableObject {
         if CMPedometer.authorizationStatus() == .denied { return .motionOff }
         startLiveSteps()
         return chipSteps > 0 ? .healthOff : .noSteps
+    }
+
+    /// The same check without asking for anything, for the daily report to the dashboard.
+    private func quietCheck() async -> (Check, chip: Int?) {
+        guard access == .ready else { return (.unavailable, nil) }
+        let chip = await HealthDays.chipToday()
+        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: .now) ?? .now
+        if await sumOfSteps(from: weekAgo) > 0 { return (.working, chip) }
+        switch CMPedometer.authorizationStatus() {
+        case .denied, .restricted: return (.motionOff, chip)
+        case .authorized: return ((chip ?? 0) > 0 ? .healthOff : .noSteps, chip)
+        default: return (.noSteps, chip)
+        }
+    }
+
+    /// Tells the admin dashboard what the step check found (users/{uid}.stepCheck), so
+    /// people whose iPhone isn't counting show up there. Written when it changes, and
+    /// once a day otherwise.
+    func report(_ check: Check? = nil, skipped: Bool = false) async {
+        guard AuthStore.isConfigured, let uid = Auth.auth().currentUser?.uid else { return }
+        let found: Check, chip: Int?
+        if let check {
+            (found, chip) = (check, await HealthDays.chipToday())
+        } else {
+            (found, chip) = await quietCheck()
+        }
+        let today = HealthDays.key(for: .now)
+        let mark = "\(uid)|\(found)|\(skipped)|\(today)"
+        guard defaults.string(forKey: "walk.reportedCheck") != mark else { return }
+        defaults.set(mark, forKey: "walk.reportedCheck")
+        var data: [String: Any] = [
+            "platform": "ios",
+            "result": "\(found)",
+            "skipped": skipped,
+            "healthToday": healthDays[today] ?? 0,
+            "at": FieldValue.serverTimestamp(),
+        ]
+        if let chip { data["chipToday"] = chip }
+        try? await Firestore.firestore().collection("users").document(uid).setData(["stepCheck": data], merge: true)
     }
 
     /// Steps typed in by hand in the Health app don't count, only ones the
