@@ -51,6 +51,10 @@ To turn on Google Maps:
 
 Debug builds can use a dashboard (`cablgram-admin`, `npm run dev`) running on your Mac instead of the deployed one: set `ADMIN_BASE_URL` in `Secrets.xcconfig` (see `Secrets.example.xcconfig`). Release builds ignore it. The dashboard and `GoogleService-Info.plist` must be for the same Firebase project.
 
+### A separate Firebase project for debug builds
+
+To keep test data out of the real project, put a second project's config at `Cablgram/GoogleService-Info-Debug.plist` (git-ignored). Debug builds then use it; release builds leave the file out and use `GoogleService-Info.plist` as always. Phone sign-in also needs that project's "Encoded App ID" as `GOOGLE_REVERSED_CLIENT_ID[config=Debug]` in `Secrets.xcconfig` (see `Secrets.example.xcconfig`). Without the debug file every build uses `GoogleService-Info.plist`.
+
 ## Run it
 
 1. Install Xcode 16 or newer.

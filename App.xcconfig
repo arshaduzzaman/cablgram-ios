@@ -14,4 +14,8 @@ AUTH_TEST_NUMBERS_ONLY = NO
 // Google Sign-In callback scheme: REVERSED_CLIENT_ID from GoogleService-Info.plist.
 GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.984186551907-9vagb2l8avod47off47ktq532d8fdpj1
 
+// GoogleService-Info-Debug.plist (optional, git-ignored) is a second Firebase project
+// that debug builds use instead. It never goes into a release build.
+EXCLUDED_SOURCE_FILE_NAMES[config=Release] = GoogleService-Info-Debug.plist
+
 #include? "Secrets.xcconfig"
