@@ -41,6 +41,7 @@ struct WalkPage: View {
                         .card()
                 }
 
+                TimedRewardsSection(onClaim: claim)
                 sponsorChallenge
                 leaderboardPreview
                 SponsorOffersRow(offers: Sponsor.offers,
@@ -118,7 +119,9 @@ struct WalkPage: View {
         .alert(item: $justClaimed) { reward in
             Alert(
                 title: Text("Claim sent 🎉"),
-                message: Text("You walked \(reward.steps.formatted()) steps for \(reward.fullName). We'll review your claim and let you know."),
+                message: Text(reward.span == nil
+                    ? "You walked \(reward.steps.formatted()) steps for \(reward.fullName). We'll review your claim and let you know."
+                    : "Your claim for \(reward.fullName) (\(reward.periodName().lowercased())) is in. We'll review it and let you know."),
                 dismissButton: .default(Text("Nice"))
             )
         }

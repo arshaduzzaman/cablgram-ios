@@ -7,7 +7,8 @@ struct Reward: Identifiable, Hashable {
     let title: String
     /// Who gives the reward, shown above the title. `nil` for none.
     let partner: String?
-    /// Steps (since joining, minus steps spent) needed to unlock.
+    /// Steps needed: since joining, minus steps spent. For a timed reward, steps walked
+    /// in its period (or on each of its days).
     let steps: Int
     /// The dashboard's icon name (food, pizza, burger, drink, coffee, game, console, ticket, shirt, gift).
     var icon: String = "gift"
@@ -20,11 +21,25 @@ struct Reward: Identifiable, Hashable {
     var claimedCount = 0
     /// Ask for a delivery address when claiming.
     var needsAddress = false
+    /// Set for a timed reward (daily, weekly, between dates); nil for the ordinary kind.
+    var schedule: RewardSchedule? = nil
+    /// Timed rewards: claims so far in each recent period, by the period's first day.
+    var periodClaims: [String: Int] = [:]
+    /// Timed rewards: the period this copy stands for (one row on the Walk page per period).
+    var span: RewardSpan? = nil
+
+    /// What your claim for this is filed under: the reward, plus the period for a timed one.
+    var claimKey: String { span.map { "\(id)__\($0.start)" } ?? id }
 
     var fullName: String { [partner, title].compactMap { $0 }.joined(separator: " ") }
 
     /// Every one has been given out (only matters if you haven't claimed it yourself).
-    var soldOut: Bool { stock.map { claimedCount >= $0 } ?? false }
+    /// A timed reward's limit is per period.
+    var soldOut: Bool {
+        guard let stock else { return false }
+        if schedule != nil { return span.map { periodClaims[$0.start] ?? 0 >= stock } ?? false }
+        return claimedCount >= stock
+    }
 
     /// Icon shown until a photo loads.
     var systemImage: String {

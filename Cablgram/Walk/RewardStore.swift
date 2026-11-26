@@ -2,7 +2,8 @@ import Foundation
 import FirebaseAuth
 import FirebaseFirestore
 
-/// A claim you sent, from `rewardClaims/{uid}__{rewardId}`. Only the server writes these:
+/// A claim you sent, from `rewardClaims/{uid}__{rewardId}` (with `__{period}` added for a
+/// timed reward). Only the server writes these:
 /// the app sends a claim through cablgram-admin /api/rewards/claim and an admin approves,
 /// rejects or marks it delivered on the dashboard.
 struct RewardClaim: Identifiable, Equatable {
@@ -19,8 +20,12 @@ struct RewardClaim: Identifiable, Equatable {
         }
     }
 
-    var id: String { rewardID }
+    /// The same as `Reward.claimKey`.
+    var id: String { period.map { "\(rewardID)__\($0)" } ?? rewardID }
     let rewardID: String
+    /// Timed rewards: the period claimed (its first day) and how to say it ("Thu 26 Nov").
+    var period: String? = nil
+    var periodLabel: String? = nil
     /// The reward's name when you claimed it (it may since be edited or removed).
     let rewardName: String
     let status: Status
@@ -35,10 +40,13 @@ final class RewardStore: ObservableObject {
     static let shared = RewardStore()
 
     @Published private(set) var rewards: [Reward] = Reward.builtIn
-    /// Your claims by reward id.
+    /// Timed rewards (daily, weekly, between dates) from `timedRewards`. Empty until they load.
+    @Published private(set) var timed: [Reward] = []
+    /// Your claims by `Reward.claimKey`.
     @Published private(set) var claims: [String: RewardClaim] = [:]
 
     private var catalogListener: ListenerRegistration?
+    private var timedListener: ListenerRegistration?
     private var claimsListener: ListenerRegistration?
     private var uid: String?
 
@@ -54,8 +62,20 @@ final class RewardStore: ObservableObject {
         guard let uid else {
             catalogListener?.remove()
             catalogListener = nil
+            timedListener?.remove()
+            timedListener = nil
             rewards = Reward.builtIn
+            timed = []
             return
+        }
+
+        if timedListener == nil {
+            timedListener = Firestore.firestore().collection("timedRewards").addSnapshotListener { [weak self] snapshot, _ in
+                guard let snapshot else { return }
+                let live = snapshot.documents.compactMap(Self.reward).filter { $0.schedule != nil }
+                    .sorted { $0.steps != $1.steps ? $0.steps < $1.steps : $0.fullName < $1.fullName }
+                Task { @MainActor in self?.timed = live }
+            }
         }
 
         if catalogListener == nil {
@@ -70,7 +90,7 @@ final class RewardStore: ObservableObject {
         claimsListener = Firestore.firestore().collection("rewardClaims").whereField("uid", isEqualTo: uid)
             .addSnapshotListener { [weak self] snapshot, _ in
                 guard let snapshot else { return }
-                let mine = Dictionary(snapshot.documents.compactMap(Self.claim).map { ($0.rewardID, $0) }) { a, _ in a }
+                let mine = Dictionary(snapshot.documents.compactMap(Self.claim).map { ($0.id, $0) }) { a, _ in a }
                 Task { @MainActor in
                     guard self?.uid == uid else { return }
                     self?.claims = mine
@@ -89,6 +109,7 @@ final class RewardStore: ObservableObject {
         let token: String
         do { token = try await user.getIDToken() } catch { throw ProfileError.message("No internet connection.") }
         var body: [String: String] = ["rewardId": reward.id]
+        if let span = reward.span { body["period"] = span.start }
         if let address, !address.isEmpty { body["address"] = address }
         if let note, !note.isEmpty { body["note"] = note }
 
@@ -112,8 +133,10 @@ final class RewardStore: ObservableObject {
             throw ProfileError.message(json["error"] as? String ?? "Something went wrong. Try again.")
         }
         // Show it as waiting right away; the listener brings the saved claim a moment later.
-        claims[reward.id] = RewardClaim(rewardID: reward.id, rewardName: reward.fullName, status: .pending,
-                                        message: nil, createdAt: .now)
+        claims[reward.claimKey] = RewardClaim(rewardID: reward.id, period: reward.span?.start,
+                                              periodLabel: reward.span.map(RewardDays.label),
+                                              rewardName: reward.fullName, status: .pending,
+                                              message: nil, createdAt: .now)
     }
 
     // MARK: - Parsing
@@ -132,15 +155,24 @@ final class RewardStore: ObservableObject {
             details: text("description"),
             stock: (x["stock"] as? NSNumber)?.intValue,
             claimedCount: (x["claimedCount"] as? NSNumber)?.intValue ?? 0,
-            needsAddress: x["needsAddress"] as? Bool ?? false
+            needsAddress: x["needsAddress"] as? Bool ?? false,
+            schedule: (x["period"] as? String).flatMap(RewardSchedule.Kind.init(rawValue:)).map {
+                RewardSchedule(kind: $0, from: text("from"), to: text("to"),
+                               weekdays: (x["weekdays"] as? [NSNumber] ?? []).map(\.intValue),
+                               everyDay: x["everyDay"] as? Bool ?? false)
+            },
+            periodClaims: (x["periodClaims"] as? [String: NSNumber] ?? [:]).mapValues(\.intValue)
         )
     }
 
     nonisolated private static func claim(_ doc: QueryDocumentSnapshot) -> RewardClaim? {
         let x = doc.data()
         guard let rewardID = x["rewardId"] as? String else { return nil }
+        let text = { (key: String) in (x[key] as? String).flatMap { $0.isEmpty ? nil : $0 } }
         return RewardClaim(
             rewardID: rewardID,
+            period: text("period"),
+            periodLabel: text("periodLabel"),
             rewardName: x["rewardName"] as? String ?? rewardID,
             status: (x["status"] as? String).flatMap(RewardClaim.Status.init(rawValue:)) ?? .pending,
             message: (x["message"] as? String).flatMap { $0.isEmpty ? nil : $0 },

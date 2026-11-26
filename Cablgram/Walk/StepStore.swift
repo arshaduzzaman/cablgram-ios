@@ -127,6 +127,18 @@ final class StepStore: ObservableObject {
         }
     }
 
+    /// Steps per day for timed rewards' progress (the server counts for itself before a claim).
+    var rewardDays: [String: Int] {
+        #if DEBUG
+        // Test steps count as walked today, so timed rewards can be tried in the Simulator.
+        var days = dailySteps
+        days[HealthDays.key(for: .now), default: 0] += testSteps
+        return days
+        #else
+        return dailySteps
+        #endif
+    }
+
     /// Steps you have to use: walked minus spent. These count toward rewards.
     var availableSteps: Int { max(totalSteps - spentSteps, 0) }
 
@@ -183,7 +195,7 @@ final class StepStore: ObservableObject {
 
     func isUnlocked(_ reward: Reward) -> Bool { availableSteps >= reward.steps }
     /// Your claim for `reward`, whatever its status.
-    func claim(for reward: Reward) -> RewardClaim? { RewardStore.shared.claims[reward.id] }
+    func claim(for reward: Reward) -> RewardClaim? { RewardStore.shared.claims[reward.claimKey] }
 
     /// Claimed and not rejected (a rejected one can be claimed again).
     func isClaimed(_ reward: Reward) -> Bool {
