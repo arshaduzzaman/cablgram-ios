@@ -12,12 +12,24 @@ import GoogleSignIn
 /// Menu tab. Android does the same.
 @MainActor
 final class AuthStore: ObservableObject {
-    /// True once GoogleService-Info.plist is in the app.
-    static let isConfigured = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil
+    /// The Firebase config in the app: GoogleService-Info.plist, or in a debug build
+    /// GoogleService-Info-Debug.plist if it's there (a separate Firebase project for
+    /// testing; release builds leave that file out).
+    private static let configPath: String? = {
+        #if DEBUG
+        if let debug = Bundle.main.path(forResource: "GoogleService-Info-Debug", ofType: "plist") { return debug }
+        #endif
+        return Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist")
+    }()
+
+    /// True once a Firebase config is in the app.
+    static let isConfigured = configPath != nil
 
     static func configureFirebase() {
-        if isConfigured && FirebaseApp.app() == nil {
-            FirebaseApp.configure()
+        if let configPath, FirebaseApp.app() == nil {
+            guard let options = FirebaseOptions(contentsOfFile: configPath) else { return }
+            print("Firebase: project \(options.projectID ?? "?")")
+            FirebaseApp.configure(options: options)
             #if DEBUG
             // AUTH_TEST_NUMBERS_ONLY = YES in Secrets.xcconfig: skips the silent push / "not a robot"
             // check so Firebase's test phone numbers sign in on the Simulator. Real numbers then fail.
