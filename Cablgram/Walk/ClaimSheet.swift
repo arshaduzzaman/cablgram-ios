@@ -27,7 +27,9 @@ struct ClaimSheet: View {
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         VStack(alignment: .leading, spacing: 4) {
                             Text(reward.fullName).font(.title3.weight(.bold))
-                            Text("\(reward.steps.formatted()) steps")
+                            Text(reward.span == nil
+                                 ? "\(reward.steps.formatted()) steps"
+                                 : "\(reward.periodName()) · \(reward.steps.formatted()) steps\(reward.schedule?.everyDay == true ? " a day" : "")")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()

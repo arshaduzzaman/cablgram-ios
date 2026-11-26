@@ -13,7 +13,7 @@ struct MenuView: View {
     @ObservedObject private var rewardStore = RewardStore.shared
     /// Your claims (newest first) and the reward each is for, when it still exists.
     private var claimed: [(claim: RewardClaim, reward: Reward?)] {
-        rewardStore.history.map { claim in (claim, rewardStore.rewards.first { $0.id == claim.rewardID }) }
+        rewardStore.history.map { claim in (claim, (rewardStore.rewards + rewardStore.timed).first { $0.id == claim.rewardID }) }
     }
 
     var body: some View {
@@ -57,6 +57,9 @@ struct MenuView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(item.reward?.fullName ?? item.claim.rewardName).font(.subheadline.weight(.semibold))
+                                    if let period = item.claim.periodLabel {
+                                        Text(period).font(.caption).foregroundStyle(.secondary)
+                                    }
                                     if let message = item.claim.message {
                                         Text(message).font(.caption).foregroundStyle(.secondary)
                                     }
