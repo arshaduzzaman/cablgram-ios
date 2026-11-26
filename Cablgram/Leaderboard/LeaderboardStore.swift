@@ -76,6 +76,16 @@ final class LeaderboardStore: ObservableObject {
     }
 
     nonisolated private static let recalcURL = Backend.url("/api/steps/recalc")
+    nonisolated private static let lastContactKey = "walk.lastServerContact"
+
+    /// With nothing new to send, still tells the server this phone is alive, at most once
+    /// an hour, so the dashboard can tell "not walking" from "not syncing".
+    nonisolated static func checkIn(background: Bool = false) {
+        let last = UserDefaults.standard.object(forKey: lastContactKey) as? Date ?? .distantPast
+        guard Date.now.timeIntervalSince(last) > 3600 else { return }
+        UserDefaults.standard.set(Date.now, forKey: lastContactKey)
+        Task { await recalc(background: background, ping: true) }
+    }
 
     /// Random ID for this install, made once. Names this phone's doc under `devices`.
     nonisolated static var deviceID: String {
@@ -164,7 +174,10 @@ final class LeaderboardStore: ObservableObject {
         let days = steps.access == .ready && steps.hasLoaded ? steps.dailySteps : nil
         let upload = Upload(uid: user.uid, localTotal: steps.stepsSinceJoining, localWeek: steps.localWeek,
                             spent: steps.spentSteps, goal: steps.goalReward?.id, days: days)
-        if upload == lastUploaded { return }
+        if upload == lastUploaded {
+            if days != nil { Self.checkIn() }
+            return
+        }
         lastUploaded = upload
         lastSent = .now
 
@@ -222,16 +235,21 @@ final class LeaderboardStore: ObservableObject {
     }
 
     /// Asks the server to work out the signed-in user's totals again.
-    /// Returns `nil` on any failure.
-    nonisolated static func recalc() async -> Recalc? {
+    /// Returns `nil` on any failure. `background` tells the dashboard whether the app was
+    /// closed. With `ping` nothing is recounted: it only shows the phone still reaches us.
+    @discardableResult
+    nonisolated static func recalc(background: Bool = false, ping: Bool = false) async -> Recalc? {
         guard let user = Auth.auth().currentUser, let token = try? await user.getIDToken() else { return nil }
         var request = URLRequest(url: recalcURL, timeoutInterval: 10)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Data("{}".utf8)
+        var body: [String: Any] = ["source": background ? "background" : "foreground"]
+        if ping { body["ping"] = true }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        UserDefaults.standard.set(Date.now, forKey: lastContactKey)
         return try? JSONDecoder().decode(Recalc.self, from: data)
     }
 

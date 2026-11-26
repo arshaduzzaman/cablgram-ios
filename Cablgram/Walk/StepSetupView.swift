@@ -36,7 +36,10 @@ struct StepSetupView: View {
                 primaryButton
 
                 if result != .working && result != .unavailable && result != nil {
-                    Button("Not now", action: onSkip)
+                    Button("Not now") {
+                        Task { await steps.report(result, skipped: true) }
+                        onSkip()
+                    }
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
@@ -211,6 +214,7 @@ struct StepSetupView: View {
         defer { checking = false }
         if !quiet { result = nil }
         let found = await steps.check()
+        await steps.report(found)
         if found == .working, result != .working { Haptics.success() }
         withAnimation(.snappy) { result = found }
     }

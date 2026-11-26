@@ -126,7 +126,8 @@ enum BackgroundSteps {
         guard !days.isEmpty else { return }
         do {
             try await LeaderboardStore.saveDevice(uid: uid, days: days)
-            _ = await LeaderboardStore.recalc()
+            // While the app is still launching it isn't "closed": only a true background wake counts.
+            await LeaderboardStore.recalc(background: UIApplication.shared.applicationState == .background)
         } catch {}
     }
 }
