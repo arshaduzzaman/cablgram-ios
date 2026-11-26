@@ -3,6 +3,8 @@ import SwiftUI
 /// Full leaderboard, opened from "See all" on the Walk page.
 struct LeaderboardView: View {
     enum Period: String, CaseIterable, Identifiable {
+        /// Progress toward your goal reward (what its race shows). Only offered when you have a goal.
+        case reward = "Your goal"
         case allTime = "All time"
         case thisWeek = "This week"
         var id: String { rawValue }
@@ -10,14 +12,23 @@ struct LeaderboardView: View {
 
     @EnvironmentObject private var auth: AuthStore
     @EnvironmentObject private var leaderboard: LeaderboardStore
-    @State private var period: Period = .allTime
+    @EnvironmentObject private var stepStore: StepStore
+    @State private var period: Period = .reward
+
+    private var goal: Reward? { stepStore.goalReward }
+    /// Without a goal there's no reward board: fall back to all time.
+    private var shown: Period { period == .reward && goal == nil ? .allTime : period }
 
     private var rows: [LeaderboardEntry] {
-        period == .allTime ? leaderboard.ranked : leaderboard.thisWeek
+        switch shown {
+        case .reward: goal.map { leaderboard.rewardRows(for: $0, steps: stepStore, auth: auth) } ?? []
+        case .allTime: leaderboard.ranked
+        case .thisWeek: leaderboard.thisWeek
+        }
     }
 
     private func steps(of entry: LeaderboardEntry) -> Int {
-        period == .allTime ? entry.totalSteps : entry.weekSteps
+        shown == .thisWeek ? entry.weekSteps : entry.totalSteps
     }
 
     private var myRank: Int? {
@@ -28,23 +39,34 @@ struct LeaderboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Picker("Period", selection: $period) {
-                    ForEach(Period.allCases) { Text($0.rawValue).tag($0) }
+                Picker("Period", selection: Binding(get: { shown }, set: { period = $0 })) {
+                    ForEach(Period.allCases.filter { $0 != .reward || goal != nil }) {
+                        Text($0 == .reward ? (goal?.title ?? $0.rawValue) : $0.rawValue).tag($0)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: period) { _, _ in Haptics.select() }
 
                 if let notice = LeaderboardNotice.current(auth: auth, leaderboard: leaderboard, isEmpty: rows.isEmpty,
-                                                          emptyText: period == .thisWeek
+                                                          emptyText: shown == .thisWeek
                                                               ? "Nobody has walked yet this week. Be the first!"
                                                               : "No walkers yet. Start walking to take #1!") {
                     notice
                 } else {
+                    if shown == .reward, let goal {
+                        Text(goal.schedule == nil
+                             ? "Steps each walker has to use toward \(goal.fullName)."
+                             : "Steps each walker has in this period toward \(goal.fullName), minus any they spent.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                     if let myRank {
                         HStack {
                             Text("You're #\(myRank)").font(.headline)
                             Spacer()
-                            Text(period == .allTime ? "all time" : "this week")
+                            Text(shown == .reward ? "to \(goal?.fullName ?? "your goal")\(goal?.schedule == nil ? "" : " · \(goal?.periodName().lowercased() ?? "")")"
+                                 : shown == .allTime ? "all time" : "this week")
+                                .lineLimit(1)
                                 .font(.subheadline)
                                 .opacity(0.85)
                         }
@@ -54,7 +76,8 @@ struct LeaderboardView: View {
                     VStack(spacing: 0) {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { index, entry in
                             LeaderRow(rank: index + 1, entry: entry, steps: steps(of: entry),
-                                      isMe: entry.id == auth.user?.uid)
+                                      isMe: entry.id == auth.user?.uid,
+                                      note: shown == .reward ? goal.flatMap { leaderboard.rewardNote(entry, goal: $0, steps: stepStore) } : nil)
                             if index < rows.count - 1 { Divider().padding(.leading, 64) }
                         }
                     }
@@ -74,6 +97,8 @@ struct LeaderRow: View {
     let entry: LeaderboardEntry
     let steps: Int
     let isMe: Bool
+    /// Shown after the number on a reward's board: "days", or a trophy once they've reached it.
+    var note: String? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -91,6 +116,9 @@ struct LeaderRow: View {
                 .contentTransition(.numericText(value: Double(steps)))
                 .animation(.smooth(duration: 0.8), value: steps)
                 .foregroundStyle(isMe ? Color.brand : .primary)
+            if let note {
+                Text(note).font(.subheadline)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -125,5 +153,21 @@ struct LeaderboardNotice: View {
             return LeaderboardNotice(text: emptyText, icon: "trophy")
         }
         return nil
+    }
+}
+
+extension LeaderboardStore {
+    /// A reward's board as leaderboard rows: `totalSteps` holds each walker's progress toward it.
+    func rewardRows(for goal: Reward, steps: StepStore, auth: AuthStore) -> [LeaderboardEntry] {
+        board(for: goal, steps: steps, uid: auth.user?.uid, name: auth.user?.displayName ?? "You", photoURL: auth.user?.photoURL)
+            .map { LeaderboardEntry(id: $0.id, name: $0.name, photoURL: $0.photoURL, totalSteps: $0.steps,
+                                    weekSteps: 0, week: "", updatedAt: $0.updatedAt) }
+    }
+
+    /// What follows a walker's number on a reward's board.
+    func rewardNote(_ entry: LeaderboardEntry, goal: Reward, steps: StepStore) -> String? {
+        let need = steps.progress(toward: goal).need
+        if entry.totalSteps >= need { return "🏆" }
+        return goal.schedule?.everyDay == true ? (entry.totalSteps == 1 ? "day" : "days") : nil
     }
 }
