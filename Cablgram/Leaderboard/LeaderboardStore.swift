@@ -310,6 +310,15 @@ final class LeaderboardStore: ObservableObject {
 
     // MARK: - Race to the reward
 
+    /// The leaderboard for one reward: the same race its track shows, furthest along first,
+    /// leaving out people who haven't started (you always show).
+    func board(for goal: Reward, steps: StepStore, uid: String?, name: String, photoURL: URL?) -> [Racer] {
+        let all = goal.schedule != nil
+            ? race(forTimed: goal, yours: steps.progress(toward: goal), uid: uid, name: name, photoURL: photoURL)
+            : race(for: goal, yourSteps: steps.availableSteps, uid: uid, name: name, photoURL: photoURL)
+        return all.filter { $0.steps > 0 || $0.isYou }
+    }
+
     /// Everyone racing to `goal`, closest to it first, by total steps.
     func race(for goal: Reward, yourSteps: Int, uid: String?, name: String, photoURL: URL?) -> [Racer] {
         var racers = ranked

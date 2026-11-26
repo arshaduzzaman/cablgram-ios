@@ -135,31 +135,42 @@ struct WalkPage: View {
                           actionTitle: leaderboard.ranked.isEmpty ? nil : "See all") {
                 showingLeaderboard = true
             }
+            // Follows your goal: everyone's progress toward that reward.
+            let goal = steps.goalReward
+            let board = goal.map { leaderboard.rewardRows(for: $0, steps: steps, auth: auth) } ?? leaderboard.ranked
+            if let goal {
+                Text("To \(goal.fullName)\(goal.schedule == nil ? "" : " · \(goal.periodName().lowercased())")")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, -6)
+            }
 
             if let notice = LeaderboardNotice.current(auth: auth, leaderboard: leaderboard,
                                                       isEmpty: leaderboard.ranked.isEmpty,
                                                       emptyText: "No walkers yet. Start walking to take #1!") {
                 notice
             } else {
-                let top = Array(leaderboard.ranked.prefix(3))
+                let top = Array(board.prefix(3))
                 let me = auth.user?.uid
+                let myRank = board.firstIndex { $0.id == me }.map { $0 + 1 }
+                let note = { (entry: LeaderboardEntry) in goal.flatMap { leaderboard.rewardNote(entry, goal: $0, steps: steps) } }
                 VStack(spacing: 0) {
                     ForEach(Array(top.enumerated()), id: \.element.id) { index, entry in
-                        LeaderRow(rank: index + 1, entry: entry, steps: entry.totalSteps, isMe: entry.id == me)
+                        LeaderRow(rank: index + 1, entry: entry, steps: entry.totalSteps, isMe: entry.id == me, note: note(entry))
                         if index < top.count - 1 { Divider().padding(.leading, 64) }
                     }
-                    if let myRank, myRank > 3, let mine = leaderboard.ranked.first(where: { $0.id == me }) {
+                    if let myRank, myRank > 3, let mine = board.first(where: { $0.id == me }) {
                         HStack {
                             Spacer()
                             Image(systemName: "ellipsis").foregroundStyle(.tertiary)
                             Spacer()
                         }
                         .padding(.vertical, 2)
-                        LeaderRow(rank: myRank, entry: mine, steps: mine.totalSteps, isMe: true)
+                        LeaderRow(rank: myRank, entry: mine, steps: mine.totalSteps, isMe: true, note: note(mine))
                     }
                 }
                 .padding(.horizontal, -14)
-                .animation(.smooth(duration: 0.6), value: leaderboard.ranked.prefix(3).map(\.id))
+                .animation(.smooth(duration: 0.6), value: board.prefix(3).map(\.id))
                 .onTapGesture {
                     Haptics.tap()
                     showingLeaderboard = true
