@@ -198,31 +198,47 @@ struct RaceTrack: View {
             if let leader, leader.steps > you.steps {
                 let left = max(goal.steps - leader.steps, 0)
                 Text("🔥").padding(.trailing, 2)
-                (Text(leader.firstName).fontWeight(.semibold) + Text(" is "))
-                    .lineLimit(1)
-                Text(left.formatted())
-                    .fontWeight(.bold)
-                    .foregroundStyle(Color.brand)
-                    .monospacedDigit()
-                    .contentTransition(.numericText(value: Double(left)))
-                Text("steps away")
-                    .lineLimit(1)
-                // Others' totals are live while their app is open, hourly-ish when closed: show how fresh the leader's is.
-                if let ago = Self.updatedAgo(leader.updatedAt) {
-                    Text("· \(ago)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    // One line: a long name gives way (then the text shrinks a little), never the number.
+                    HStack(spacing: 4) {
+                        Text(leader.firstName)
+                            .fontWeight(.semibold)
+                            .lineLimit(1)
+                        Group {
+                            Text("is")
+                            Text(left.formatted())
+                                .fontWeight(.bold)
+                                .foregroundStyle(Color.brand)
+                                .monospacedDigit()
+                                .contentTransition(.numericText(value: Double(left)))
+                            Text("steps away")
+                        }
                         .lineLimit(1)
+                        .fixedSize()
+                        .layoutPriority(1)
+                    }
+                    .minimumScaleFactor(0.85)
+                    // Others' totals are live while their app is open, hourly-ish when closed: show how fresh the leader's is.
+                    if let ago = Self.updatedAgo(leader.updatedAt) {
+                        Text(ago)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             } else {
                 Text("🔥 You're leading the race")
                     .fontWeight(.semibold)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
             Spacer(minLength: 4)
             Text("You're #\(rank)")
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
                 .contentTransition(.numericText(value: Double(rank)))
+                .lineLimit(1)
+                .fixedSize()
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.tertiary)
