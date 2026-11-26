@@ -47,6 +47,10 @@ To turn on Google Maps:
 3. Copy `Secrets.example.xcconfig` to `Secrets.xcconfig` and paste the key. `Secrets.xcconfig` is git-ignored, so the key never lands on GitHub.
 4. Build and run.
 
+## Phone sign-in
+
+The code is texted by the dashboard server (`POST /api/auth/phone` in `cablgram-admin`, through Alpha SMS), not by Firebase: Firebase's texts don't reach every Bangladeshi operator. The app sends the number, then the code, and signs in with the Firebase custom token it gets back. Adding or changing a number on an account goes through the same endpoint. When testing locally, the server's `SMS_TEST_NUMBERS` gives test numbers a fixed code.
+
 ## Testing against a local dashboard
 
 Debug builds can use a dashboard (`cablgram-admin`, `npm run dev`) running on your Mac instead of the deployed one: set `ADMIN_BASE_URL` in `Secrets.xcconfig` (see `Secrets.example.xcconfig`). Release builds ignore it. The dashboard and `GoogleService-Info.plist` must be for the same Firebase project.
