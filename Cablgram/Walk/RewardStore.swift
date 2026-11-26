@@ -32,6 +32,9 @@ struct RewardClaim: Identifiable, Equatable {
     /// The admin's note: pickup details, or why it wasn't approved.
     let message: String?
     let createdAt: Date
+    /// Steps the claim cost (given back if it's rejected), and for a timed reward the days they came from.
+    var stepsSpent = 0
+    var spentDays: [String: Int] = [:]
 }
 
 /// The rewards (edited on the dashboard) and your claims, both live from Firestore.
@@ -132,11 +135,14 @@ final class RewardStore: ObservableObject {
         guard (200..<300).contains(code) else {
             throw ProfileError.message(json["error"] as? String ?? "Something went wrong. Try again.")
         }
-        // Show it as waiting right away; the listener brings the saved claim a moment later.
+        // Show it as waiting right away (with what it cost); the listener brings the saved claim a moment later.
+        let sent = json["claim"] as? [String: Any] ?? [:]
         claims[reward.claimKey] = RewardClaim(rewardID: reward.id, period: reward.span?.start,
                                               periodLabel: reward.span.map(RewardDays.label),
                                               rewardName: reward.fullName, status: .pending,
-                                              message: nil, createdAt: .now)
+                                              message: nil, createdAt: .now,
+                                              stepsSpent: (sent["stepsSpent"] as? NSNumber)?.intValue ?? 0,
+                                              spentDays: (sent["spentDays"] as? [String: NSNumber] ?? [:]).mapValues(\.intValue))
     }
 
     // MARK: - Parsing
@@ -176,7 +182,9 @@ final class RewardStore: ObservableObject {
             rewardName: x["rewardName"] as? String ?? rewardID,
             status: (x["status"] as? String).flatMap(RewardClaim.Status.init(rawValue:)) ?? .pending,
             message: (x["message"] as? String).flatMap { $0.isEmpty ? nil : $0 },
-            createdAt: (x["createdAt"] as? Timestamp)?.dateValue() ?? .now
+            createdAt: (x["createdAt"] as? Timestamp)?.dateValue() ?? .now,
+            stepsSpent: (x["stepsSpent"] as? NSNumber)?.intValue ?? 0,
+            spentDays: (x["spentDays"] as? [String: NSNumber] ?? [:]).mapValues(\.intValue)
         )
     }
 }

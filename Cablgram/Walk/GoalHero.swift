@@ -31,8 +31,8 @@ struct GoalHero: View {
             HStack {
                 Text("This week **\(steps.stepsThisWeek.formatted())** steps")
                 Spacer()
-                Text(steps.spentSteps > 0
-                     ? "Walked **\(steps.totalSteps.formatted())** · spent \(steps.spentSteps.formatted())"
+                Text(steps.spentSteps + steps.rewardSpent > 0
+                     ? "Walked **\(steps.totalSteps.formatted())** · spent \((steps.spentSteps + steps.rewardSpent).formatted())"
                      : "Total **\(steps.totalSteps.formatted())**")
             }
             .font(.footnote)
@@ -51,7 +51,7 @@ struct GoalHero: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("YOUR GOAL")
+                Text(goal.schedule == nil ? "YOUR GOAL" : "YOUR GOAL · \(goal.periodName().uppercased())")
                     .font(.caption.weight(.bold))
                     .tracking(0.6)
                     .foregroundStyle(Color.brand)
@@ -75,8 +75,20 @@ struct GoalHero: View {
         }
     }
 
+    @ViewBuilder
     private func progress(_ goal: Reward) -> some View {
-        let remaining = max(goal.steps - steps.availableSteps, 0)
+        if goal.schedule != nil, steps.progress(toward: goal).missed {
+            Text("A day was missed, so this one is out of reach. Pick another goal.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        } else {
+            walking(to: goal)
+        }
+    }
+
+    private func walking(to goal: Reward) -> some View {
+        let remaining = steps.stepsToGoal
+        let everyDay = goal.schedule?.everyDay == true
         let pace = steps.dailyPace
         let days = pace >= 500 ? Int((Double(remaining) / Double(pace)).rounded(.up)) : nil
         let minutes = Int((Double(remaining) / stepsPerMinute).rounded())
@@ -89,7 +101,7 @@ struct GoalHero: View {
                         .monospacedDigit()
                         .contentTransition(.numericText(value: Double(remaining)))
                         .animation(.smooth(duration: 0.8), value: remaining)
-                    Text("steps to go")
+                    Text(everyDay ? "steps to go today" : "steps to go")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -97,6 +109,17 @@ struct GoalHero: View {
                 RaceTrack(goal: goal, onOpenLeaderboard: onOpenLeaderboard)
             }
 
+            if goal.schedule != nil {
+                // A limited-time reward: what matters is when its period ends.
+                Label {
+                    Text(everyDay && remaining == 0
+                         ? "Today's steps are done. **\(goal.timeLeft())**"
+                         : "Roughly **\(Self.duration(minutes))** of walking. **\(goal.timeLeft())**")
+                } icon: {
+                    Image(systemName: "clock").foregroundStyle(Color.brand)
+                }
+                .font(.subheadline)
+            } else {
             Label {
                 Text(days.map { $0 <= 1 ? "Roughly **\(Self.duration(minutes))** of walking. You could get it **today**"
                                          : "Roughly **\(Self.duration(minutes))** of walking, about **\($0) days** at your pace" }
@@ -105,6 +128,7 @@ struct GoalHero: View {
                 Image(systemName: "clock").foregroundStyle(Color.brand)
             }
             .font(.subheadline)
+            }
         }
     }
 
@@ -151,12 +175,22 @@ struct GoalPicker: View {
     @EnvironmentObject private var steps: StepStore
     @Environment(\.dismiss) private var dismiss
 
+    /// Limited-time rewards running today (soonest to end first), then the ordinary ones.
+    private var choices: [Reward] {
+        let timed = RewardStore.shared.timed
+            .compactMap { steps.timedOffer($0.id) }
+            .filter { !steps.isClaimed($0) && !$0.soldOut && !steps.progress(toward: $0).missed }
+            .sorted { ($0.span?.end ?? "", $0.steps) < ($1.span?.end ?? "", $1.steps) }
+        return timed + Reward.all.filter { !steps.isClaimed($0) }
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                ForEach(Reward.all.filter { !steps.isClaimed($0) }) { reward in
-                    let remaining = max(reward.steps - steps.availableSteps, 0)
-                    let isGoal = reward.id == steps.goalReward?.id
+                ForEach(choices, id: \.claimKey) { reward in
+                    let got = steps.progress(toward: reward)
+                    let remaining = max(got.need - got.done, 0)
+                    let isGoal = reward.claimKey == steps.goalReward?.claimKey
                     Button {
                         Haptics.select()
                         steps.setGoal(reward)
@@ -169,7 +203,13 @@ struct GoalPicker: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(reward.fullName)
                                     .font(.subheadline.weight(.semibold))
-                                Text(remaining == 0 ? "Ready to claim" : "\(remaining.formatted()) steps to go")
+                                if reward.schedule != nil {
+                                    Text("\(reward.periodName()) · \(reward.timeLeft())".uppercased())
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(Color.brand)
+                                }
+                                Text(remaining == 0 ? "Ready to claim"
+                                     : "\(remaining.formatted()) \(reward.schedule?.everyDay == true ? (remaining == 1 ? "day" : "days") : "steps") to go")
                                     .font(.footnote)
                                     .foregroundStyle(remaining == 0 ? Color.brand : .secondary)
                                     .monospacedDigit()

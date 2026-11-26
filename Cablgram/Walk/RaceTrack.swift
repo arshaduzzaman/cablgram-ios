@@ -19,9 +19,17 @@ struct RaceTrack: View {
     /// Rivals whose phone hasn't sent steps for this long are shown faded.
     private static let staleAfter: TimeInterval = 60 * 60
 
+    /// How far you are, and the finish, in steps (or days for an every-day reward).
+    private var yours: (done: Int, need: Int, missed: Bool) { steps.progress(toward: goal) }
+    private var countsDays: Bool { goal.schedule?.everyDay == true }
+
     private var racers: [Racer] {
-        leaderboard.race(for: goal, yourSteps: steps.availableSteps, uid: auth.user?.uid,
-                         name: auth.user?.displayName ?? "You", photoURL: auth.user?.photoURL)
+        let name = auth.user?.displayName ?? "You"
+        if goal.schedule != nil {
+            return leaderboard.race(forTimed: goal, yours: yours, uid: auth.user?.uid, name: name, photoURL: auth.user?.photoURL)
+        }
+        return leaderboard.race(for: goal, yourSteps: steps.availableSteps, uid: auth.user?.uid,
+                                name: name, photoURL: auth.user?.photoURL)
     }
 
     var body: some View {
@@ -36,10 +44,10 @@ struct RaceTrack: View {
                 .frame(height: 58)
 
             HStack {
-                Text("\(steps.availableSteps.formatted()) of \(goal.steps.formatted()) steps")
-                    .contentTransition(.numericText(value: Double(steps.availableSteps)))
+                Text("\(yours.done.formatted()) of \(yours.need.formatted()) \(countsDays ? "days" : "steps")")
+                    .contentTransition(.numericText(value: Double(yours.done)))
                 Spacer()
-                Text("\(Int(min(Double(steps.availableSteps) / Double(goal.steps), 1) * 100))%")
+                Text("\(Int(min(Double(yours.done) / Double(max(yours.need, 1)), 1) * 100))%")
                     .fontWeight(.semibold)
                     .foregroundStyle(Color.brand)
             }
@@ -65,7 +73,9 @@ struct RaceTrack: View {
             }
             .buttonStyle(.plain)
 
-            Text("Faded walkers haven't sent steps for a while and may be further ahead. Steps count only if they reach Cablgram by midday the next day.")
+            Text(goal.schedule == nil
+                 ? "Faded walkers haven't sent steps for a while and may be further ahead. Steps count only if they reach Cablgram by midday the next day."
+                 : "Only steps walked in this period count, minus any you spend. Faded walkers haven't sent steps for a while.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -116,66 +126,7 @@ struct RaceTrack: View {
     // MARK: - Track
 
     private func track(shown: [Racer], you: Racer) -> some View {
-        GeometryReader { geo in
-            let width = geo.size.width - 30 // room for the finish
-            let x: (Racer) -> CGFloat = { racer in
-                14 + width * CGFloat(min(Double(racer.steps) / Double(goal.steps), 1)) - 14
-            }
-
-            ZStack(alignment: .topLeading) {
-                // Track and your progress
-                Capsule().fill(Color(.systemFill))
-                    .frame(width: width + 6, height: 8)
-                    .offset(y: 44)
-                Capsule().fill(Color.brand)
-                    .frame(width: max(8, x(you) + 14), height: 8)
-                    .offset(y: 44)
-
-                // Finish: the reward itself
-                RewardImage(reward: goal)
-                    .frame(width: 30, height: 30)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.white, lineWidth: 2))
-                    .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
-                    .offset(x: geo.size.width - 30, y: 33)
-
-                // Rivals above the track, alternating heights so they don't overlap
-                ForEach(Array(shown.filter { !$0.isYou }.enumerated()), id: \.element.id) { index, racer in
-                    VStack(spacing: 2) {
-                        let stale = Self.isStale(racer)
-                        ZStack(alignment: .bottomTrailing) {
-                            Avatar(url: racer.photoURL, name: racer.name, size: 24)
-                                .overlay(Circle().stroke(.white, lineWidth: 2))
-                                .saturation(stale ? 0 : 1)
-                                .opacity(stale ? 0.45 : 1)
-                            if racer.finished {
-                                Text("🏆").font(.system(size: 10)).offset(x: 4, y: 3)
-                            }
-                        }
-                        .overlay(alignment: .topTrailing) {
-                            // How old their steps are.
-                            if stale, let ago = Self.shortAgo(racer.updatedAt) {
-                                Text(ago)
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 3)
-                                    .background(Color.gray, in: Capsule())
-                                    .offset(x: 8, y: -4)
-                            }
-                        }
-                        .accessibilityLabel(stale ? "\(racer.firstName), steps from \(Self.updatedAgo(racer.updatedAt) ?? "a while ago")" : racer.firstName)
-                        Rectangle().fill(Color(.separator)).frame(width: 1, height: index.isMultiple(of: 2) ? 8 : 0)
-                    }
-                    .offset(x: x(racer) + 2, y: index.isMultiple(of: 2) ? 2 : 12)
-                }
-
-                // You, on the track
-                Avatar(url: you.photoURL, name: you.name, size: 28)
-                    .overlay(Circle().stroke(Color.brand, lineWidth: 3))
-                    .background(Circle().fill(.white).padding(-3))
-                    .offset(x: x(you), y: 34)
-            }
-        }
+        RaceLane(shown: shown, you: you, target: max(yours.need, 1), reward: goal)
     }
 
     // MARK: - Leader line
@@ -196,7 +147,7 @@ struct RaceTrack: View {
     private func leaderLine(leader: Racer?, you: Racer, rank: Int, total: Int) -> some View {
         HStack(spacing: 4) {
             if let leader, leader.steps > you.steps {
-                let left = max(goal.steps - leader.steps, 0)
+                let left = max(yours.need - leader.steps, 0)
                 Text("🔥").padding(.trailing, 2)
                 VStack(alignment: .leading, spacing: 1) {
                     // One line: a long name gives way (then the text shrinks a little), never the number.
@@ -211,7 +162,7 @@ struct RaceTrack: View {
                                 .foregroundStyle(Color.brand)
                                 .monospacedDigit()
                                 .contentTransition(.numericText(value: Double(left)))
-                            Text("steps away")
+                            Text(countsDays ? (left == 1 ? "day away" : "days away") : "steps away")
                         }
                         .lineLimit(1)
                         .fixedSize()
@@ -261,5 +212,77 @@ struct RaceTrack: View {
         picked.append(you)
         if let next = behind.first { picked.append(next) }
         return picked
+    }
+}
+
+/// The track itself: you on the bar, rivals above it, the reward at the finish.
+/// `target` is what the finish stands for, in the same unit as the racers' steps.
+struct RaceLane: View {
+    let shown: [Racer]
+    let you: Racer
+    let target: Int
+    let reward: Reward
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width - 30 // room for the finish
+            let x: (Racer) -> CGFloat = { racer in
+                14 + width * CGFloat(min(Double(racer.steps) / Double(target), 1)) - 14
+            }
+
+            ZStack(alignment: .topLeading) {
+                // Track and your progress
+                Capsule().fill(Color(.systemFill))
+                    .frame(width: width + 6, height: 8)
+                    .offset(y: 44)
+                Capsule().fill(Color.brand)
+                    .frame(width: max(8, x(you) + 14), height: 8)
+                    .offset(y: 44)
+
+                // Finish: the reward itself
+                RewardImage(reward: reward)
+                    .frame(width: 30, height: 30)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.white, lineWidth: 2))
+                    .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
+                    .offset(x: geo.size.width - 30, y: 33)
+
+                // Rivals above the track, alternating heights so they don't overlap
+                ForEach(Array(shown.filter { !$0.isYou }.enumerated()), id: \.element.id) { index, racer in
+                    VStack(spacing: 2) {
+                        let stale = RaceTrack.isStale(racer)
+                        ZStack(alignment: .bottomTrailing) {
+                            Avatar(url: racer.photoURL, name: racer.name, size: 24)
+                                .overlay(Circle().stroke(.white, lineWidth: 2))
+                                .saturation(stale ? 0 : 1)
+                                .opacity(stale ? 0.45 : 1)
+                            if racer.finished {
+                                Text("🏆").font(.system(size: 10)).offset(x: 4, y: 3)
+                            }
+                        }
+                        .overlay(alignment: .topTrailing) {
+                            // How old their steps are.
+                            if stale, let ago = RaceTrack.shortAgo(racer.updatedAt) {
+                                Text(ago)
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 3)
+                                    .background(Color.gray, in: Capsule())
+                                    .offset(x: 8, y: -4)
+                            }
+                        }
+                        .accessibilityLabel(stale ? "\(racer.firstName), steps from \(RaceTrack.updatedAgo(racer.updatedAt) ?? "a while ago")" : racer.firstName)
+                        Rectangle().fill(Color(.separator)).frame(width: 1, height: index.isMultiple(of: 2) ? 8 : 0)
+                    }
+                    .offset(x: x(racer) + 2, y: index.isMultiple(of: 2) ? 2 : 12)
+                }
+
+                // You, on the track
+                Avatar(url: you.photoURL, name: you.name, size: 28)
+                    .overlay(Circle().stroke(Color.brand, lineWidth: 3))
+                    .background(Circle().fill(.white).padding(-3))
+                    .offset(x: x(you), y: 34)
+            }
+        }
     }
 }
