@@ -74,22 +74,20 @@ struct SectionTitle: View {
     }
 }
 
-/// The Cablgram logo: "cabl." stacked over "gram" in tight Helvetica Bold.
+/// The Cablgram logo: "cabl." stacked over "gram", drawn from the brand's vector artwork
+/// (Assets → CablgramLogo) in one colour.
 struct CablgramLogo: View {
-    /// Font size of each line.
+    /// Roughly the letter size, as when the logo was set in type: the artwork is about 1.6 times as tall.
     var size: CGFloat
     var color: Color = .white
 
     var body: some View {
-        VStack(alignment: .leading, spacing: -size * 0.52) {
-            Text("cabl.")
-            Text("gram")
-        }
-        .font(.custom("HelveticaNeue-Bold", size: size))
-        .tracking(-size * 0.035)
-        .foregroundStyle(color)
-        .fixedSize()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("cablgram")
+        Image("CablgramLogo")
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .frame(height: size * 1.6)
+            .foregroundStyle(color)
+            .accessibilityLabel("cablgram")
     }
 }
