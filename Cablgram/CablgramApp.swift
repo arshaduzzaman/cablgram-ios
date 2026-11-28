@@ -13,6 +13,7 @@ struct CablgramApp: App {
     @AppStorage("setup.stepsChecked") private var stepsChecked = false
     /// "Not now" on the step check: asked again next launch.
     @State private var skippedStepCheck = false
+    @ObservedObject private var config = AppConfig.shared
 
     init() {
         // Firebase is set up in AppDelegate.didFinishLaunching, not here: this runs before
@@ -26,7 +27,9 @@ struct CablgramApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if !auth.canEnterApp {
+                if config.mustUpdate {
+                    UpdateRequiredView()
+                } else if !auth.canEnterApp {
                     SignInView()
                 } else if auth.user != nil && !auth.profileLoaded {
                     ZStack {
@@ -47,6 +50,8 @@ struct CablgramApp: App {
             .environmentObject(leaderboard)
             .tint(.brand)
             .preferredColorScheme(.light)
+            .modifier(UpdatePrompt())
+            .task { await config.refresh(force: true) }
             // Keep users/{uid} fresh for the admin dashboard.
             .onChange(of: auth.user?.uid, initial: true) {
                 UserProfile.sync(force: true)
@@ -54,6 +59,7 @@ struct CablgramApp: App {
             }
             .onChange(of: scenePhase) {
                 if scenePhase == .active {
+                    Task { await config.refresh() }
                     UserProfile.sync()
                     LocationTracker.shared.refreshArea()
                 }

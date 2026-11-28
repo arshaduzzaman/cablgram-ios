@@ -133,7 +133,8 @@ struct EggComposer: View {
     @FocusState private var typing: Bool
 
     static let maxLength = 80
-    static let chips = ["Get moving 😤", "Couch potato 🥔", "I'm catching up 👀", "Walk with me?"]
+    /// One-tap messages, set on the dashboard.
+    static var chips: [String] { AppConfig.current.eggChips }
     private let avatarSize: CGFloat = 132
     private var flight: TimeInterval { reduceMotion ? 0 : 0.55 }
 

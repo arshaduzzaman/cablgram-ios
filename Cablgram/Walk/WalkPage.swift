@@ -8,6 +8,7 @@ struct WalkPage: View {
     @EnvironmentObject private var leaderboard: LeaderboardStore
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
+    @ObservedObject private var config = AppConfig.shared
 
     @State private var showingLeaderboard = false
     @State private var showingGoalPicker = false
@@ -42,11 +43,13 @@ struct WalkPage: View {
                 }
 
                 TimedRewardsSection(onClaim: claim)
-                sponsorChallenge
+                if config.settings.showSponsors { sponsorChallenge }
                 leaderboardPreview
-                SponsorOffersRow(offers: Sponsor.offers,
-                                 onOpen: { sponsor in sponsor.link.map { openURL($0) } },
-                                 onInvite: inviteSponsor)
+                if config.settings.showSponsors {
+                    SponsorOffersRow(offers: config.settings.sponsors.filter { $0.spot == .offer },
+                                     onOpen: { sponsor in sponsor.link.map { openURL($0) } },
+                                     onInvite: inviteSponsor)
+                }
                 rewards
 
                 #if DEBUG
@@ -213,7 +216,7 @@ struct WalkPage: View {
     /// This week's sponsored challenge, or an invite to sponsor it.
     @ViewBuilder
     private var sponsorChallenge: some View {
-        if let sponsor = Sponsor.challenge {
+        if let sponsor = config.settings.sponsors.first(where: { $0.spot == .challenge }) {
             SponsorChallengeCard(sponsor: sponsor, weekSteps: steps.stepsThisWeek) {
                 sponsor.link.map { openURL($0) }
             }
@@ -227,7 +230,7 @@ struct WalkPage: View {
 
     private func inviteSponsor() {
         Haptics.tap()
-        if let url = Sponsor.contactURL { openURL(url) }
+        if let url = URL(string: config.settings.sponsorContact) { openURL(url) }
     }
 
     // MARK: - Helpers

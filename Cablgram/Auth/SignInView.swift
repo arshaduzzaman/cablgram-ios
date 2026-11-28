@@ -8,7 +8,7 @@ struct SignInView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let headline = Array("Walk more. Win real things.")
-    private static let subtitle = "Steps turn into food, games and a PS5."
+    @ObservedObject private var config = AppConfig.shared
 
     /// How many letters of the headline are showing.
     @State private var typed = 0
@@ -30,7 +30,7 @@ struct SignInView: View {
                     CablgramLogo(size: 56)
                         .padding(.bottom, 10)
                     headline
-                    Text(Self.subtitle)
+                    Text(config.settings.signInSubtitle)
                         .font(.title3)
                         .opacity(showSubtitle ? 0.9 : 0)
                 }

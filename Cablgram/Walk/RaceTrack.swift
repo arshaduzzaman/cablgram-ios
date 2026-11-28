@@ -14,10 +14,10 @@ struct RaceTrack: View {
     /// "Fariz caught up +3,200", shown for a few seconds.
     @State private var catchUp: (name: String, gain: Int)?
 
-    /// A jump this big in one update gets announced.
-    private static let catchUpSteps = 1_000
+    /// A jump this big in one update gets announced (set on the dashboard, like the one below).
+    private static var catchUpSteps: Int { AppConfig.current.raceCatchUpSteps }
     /// Rivals whose phone hasn't sent steps for this long are shown faded.
-    private static let staleAfter: TimeInterval = 60 * 60
+    private static var staleAfter: TimeInterval { TimeInterval(AppConfig.current.raceStaleMinutes) * 60 }
 
     /// How far you are, and the finish, in steps (or days for an every-day reward).
     private var yours: (done: Int, need: Int, missed: Bool) { steps.progress(toward: goal) }
@@ -73,9 +73,7 @@ struct RaceTrack: View {
             }
             .buttonStyle(.plain)
 
-            Text(goal.schedule == nil
-                 ? "Faded walkers haven't sent steps for a while and may be further ahead. Steps count only if they reach Cablgram by midday the next day."
-                 : "Only steps walked in this period count, minus any you spend. Faded walkers haven't sent steps for a while.")
+            Text(goal.schedule == nil ? AppConfig.current.raceNote : AppConfig.current.timedRaceNote)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }

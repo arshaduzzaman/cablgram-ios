@@ -63,6 +63,7 @@ struct MainView: View {
     @State private var eggs = EggStore()
     /// Conversations with friends (the Messages tab).
     @State private var inbox = InboxStore()
+    @ObservedObject private var config = AppConfig.shared
 
 
     var body: some View {
@@ -78,9 +79,11 @@ struct MainView: View {
                 WalkPage()
                     .tracksPage(.walk, showing: $showing)
                     .tag(AppTab.walk)
-                DiscoverView()
-                    .tracksPage(.discover, showing: $showing)
-                    .tag(AppTab.discover)
+                if config.settings.showDiscover {
+                    DiscoverView()
+                        .tracksPage(.discover, showing: $showing)
+                        .tag(AppTab.discover)
+                }
                 MenuView()
                     .tracksPage(.menu, showing: $showing)
                     .tag(AppTab.menu)
@@ -90,10 +93,14 @@ struct MainView: View {
             .contentMargins(.bottom, 92, for: .scrollContent)
             .ignoresSafeArea(.all, edges: .bottom)
 
-            Dock(selection: $tab, showing: showing, dock: dock)
+            Dock(selection: $tab, showing: showing, dock: dock, showDiscover: config.settings.showDiscover)
         }
 
         .environment(\.dockState, dock)
+        // Discover was switched off while you were on it.
+        .onChange(of: config.settings.showDiscover) { _, shown in
+            if !shown && tab == .discover { tab = .news }
+        }
         // Ask to allow notifications once you're in, then location; open the tab a tapped
         // notification points to.
         .task {
@@ -106,7 +113,11 @@ struct MainView: View {
         }
         .onReceive(PushRouter.shared.$openTab) { target in
             guard let target else { return }
-            if target == .friends { inbox.open() } else { withAnimation(.snappy) { tab = target } }
+            if target == .friends {
+                inbox.open()
+            } else if target != .discover || config.settings.showDiscover {
+                withAnimation(.snappy) { tab = target }
+            }
             PushRouter.shared.openTab = nil
         }
         .onReceive(PushRouter.shared.$openChat) { uid in
@@ -179,6 +190,8 @@ private struct Dock: View {
     @Environment(InboxStore.self) private var inbox: InboxStore?
     @EnvironmentObject private var friends: FriendsStore
     @ObservedObject var dock: DockState
+    /// The Discover tab can be switched off on the dashboard.
+    var showDiscover = true
     @Namespace private var pill
 
     /// Unread messages plus friend requests waiting for you.
@@ -191,7 +204,7 @@ private struct Dock: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(AppTab.allCases.filter { $0 != .friends }) { tab in
+            ForEach(AppTab.allCases.filter { $0 != .friends && ($0 != .discover || showDiscover) }) { tab in
                 let isSelected = tab == showing
                 Button {
                     guard selection != tab || showing != tab else { return }

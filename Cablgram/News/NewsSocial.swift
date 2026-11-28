@@ -204,9 +204,9 @@ struct Headline: Identifiable, Equatable {
 
     var firstName: String { author.components(separatedBy: " ").first ?? author }
 
-    /// The least a headline can cost.
-    static let minimumSteps = 500
+    /// The least a headline can cost (set on the dashboard, like the two below).
+    static var minimumSteps: Int { AppConfig.current.headlineMinimumSteps }
     /// How much more than the current top headline it takes to replace it.
-    static let outbidBy = 100
-    static let maxLength = 80
+    static var outbidBy: Int { AppConfig.current.headlineOutbidBy }
+    static var maxLength: Int { AppConfig.current.headlineMaxLength }
 }

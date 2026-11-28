@@ -8,6 +8,7 @@ import SwiftUI
 /// - **Offer**: a card in the "Partner offers" row further down.
 ///
 /// Empty spots show an invite for brands to sponsor them instead.
+/// The list comes from the dashboard (`AppConfig`), so selling a spot needs no app update.
 struct Sponsor: Identifiable, Hashable {
     enum Spot: Hashable { case challenge, offer }
 
@@ -23,43 +24,42 @@ struct Sponsor: Identifiable, Hashable {
     var weeklySteps: Int? = nil
     /// The card's colours, top-left to bottom-right (hex, e.g. "FF2684").
     let colors: [String]
-    /// SF Symbol drawn big in the corner.
-    let symbol: String
+    /// The dashboard's picture name (gift, shoe, food, pizza, burger, drink, coffee, game, ticket, shirt).
+    let icon: String
     /// Where "Get offer" goes.
     let link: URL?
-    /// Made-up brands to preview the spots in test builds.
-    var sample: Bool = false
 
-    /// Where brands get in touch to sponsor a spot.
-    static let contactURL = URL(string: "mailto:sponsors@cablgram.com?subject=Sponsor%20a%20spot%20on%20Cablgram")
-
-    /// Edit this list to sell the spots. Samples only show in test builds.
-    static let all: [Sponsor] = [
-        Sponsor(id: "sample-stride", spot: .challenge, name: "Stride",
-                offer: "20% off running shoes",
-                detail: "Walk 20,000 steps this week to unlock it.",
-                weeklySteps: 20_000, colors: ["FF2684", "FF7A45"], symbol: "shoe.2.fill",
-                link: nil, sample: true),
-        Sponsor(id: "sample-fresh", spot: .offer, name: "Fresh Press",
-                offer: "Free juice after 5k", detail: "Any outlet in Dhaka",
-                colors: ["22C55E", "0EA5A4"], symbol: "cup.and.saucer.fill",
-                link: nil, sample: true),
-        Sponsor(id: "sample-tide", spot: .offer, name: "Tide Water",
-                offer: "Buy 1 get 1 bottle", detail: "Stay cool on your walk",
-                colors: ["3B82F6", "6366F1"], symbol: "drop.fill",
-                link: nil, sample: true),
-    ]
-
-    static var live: [Sponsor] {
-        #if DEBUG
-        all
-        #else
-        all.filter { !$0.sample }
-        #endif
+    /// SF Symbol drawn big in the corner.
+    var symbol: String {
+        switch icon {
+        case "shoe": "shoe.2.fill"
+        case "food": "takeoutbag.and.cup.and.straw.fill"
+        case "pizza": "fork.knife"
+        case "burger": "fork.knife.circle.fill"
+        case "drink": "waterbottle.fill"
+        case "coffee": "cup.and.saucer.fill"
+        case "game": "gamecontroller.fill"
+        case "ticket": "ticket.fill"
+        case "shirt": "tshirt.fill"
+        default: "gift.fill"
+        }
     }
 
-    static var challenge: Sponsor? { live.first { $0.spot == .challenge } }
-    static var offers: [Sponsor] { live.filter { $0.spot == .offer } }
+    /// One sponsor as the server sends it (dashboard → Sponsors); nil when it can't be drawn.
+    init?(json: [String: Any]) {
+        guard let id = json["id"] as? String, let name = json["name"] as? String, !name.isEmpty,
+              let offer = json["offer"] as? String else { return nil }
+        let colors = (json["colors"] as? [String] ?? []).filter { $0.count == 6 }
+        self.id = id
+        self.spot = json["spot"] as? String == "challenge" ? .challenge : .offer
+        self.name = name
+        self.offer = offer
+        self.detail = json["detail"] as? String ?? ""
+        self.weeklySteps = (json["weeklySteps"] as? NSNumber)?.intValue
+        self.colors = colors.count >= 2 ? colors : ["FF2684", "FF7A45"]
+        self.icon = json["icon"] as? String ?? "gift"
+        self.link = (json["link"] as? String).flatMap(URL.init(string:))
+    }
 
     var gradient: LinearGradient {
         LinearGradient(colors: colors.map(Color.init(hex:)), startPoint: .topLeading, endPoint: .bottomTrailing)
