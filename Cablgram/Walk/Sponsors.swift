@@ -22,7 +22,13 @@ struct Sponsor: Identifiable, Hashable {
     let detail: String
     /// For a challenge: steps to walk this week to unlock the offer.
     var weeklySteps: Int? = nil
-    /// The card's colours, top-left to bottom-right (hex, e.g. "FF2684").
+    /// The picture that fills the card, when the dashboard has one for it.
+    let image: URL?
+    /// Which part of the picture shows: (0, 0) its top left, (1, 1) its bottom right.
+    let focus: UnitPoint
+    /// How far the picture is zoomed in past just covering the card (1 to 3).
+    let zoom: CGFloat
+    /// The card's colours, top-left to bottom-right (hex, e.g. "FF2684"). Drawn until the picture loads, or without one.
     let colors: [String]
     /// The dashboard's picture name (gift, shoe, food, pizza, burger, drink, coffee, game, ticket, shirt).
     let icon: String
@@ -58,6 +64,10 @@ struct Sponsor: Identifiable, Hashable {
         self.weeklySteps = (json["weeklySteps"] as? NSNumber)?.intValue
         self.colors = colors.count >= 2 ? colors : ["FF2684", "FF7A45"]
         self.icon = json["icon"] as? String ?? "gift"
+        self.image = (json["image"] as? String).flatMap(URL.init(string:))
+        let focus = (json["focus"] as? [NSNumber] ?? []).map { min(max(CGFloat($0.doubleValue), 0), 1) }
+        self.focus = focus.count == 2 ? UnitPoint(x: focus[0], y: focus[1]) : .center
+        self.zoom = min(max(CGFloat((json["zoom"] as? NSNumber)?.doubleValue ?? 1), 1), 3)
         self.link = (json["link"] as? String).flatMap(URL.init(string:))
     }
 
@@ -114,6 +124,47 @@ private struct CardDecoration: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .allowsHitTesting(false)
+    }
+}
+
+/// A card's background: the sponsor's picture, placed exactly as the dashboard's preview shows it
+/// (scaled to cover the card, then by `zoom`, and slid so `focus` decides which part shows), with
+/// the bottom darkened so the words stay readable. The colours show until it loads, or without one.
+private struct SponsorBackground: View {
+    let sponsor: Sponsor
+    var symbolSize: CGFloat
+    var decorationOpacity: Double = 1
+
+    var body: some View {
+        if let url = sponsor.image {
+            GeometryReader { geo in
+                AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
+                    if let image = phase.image {
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .scaleEffect(sponsor.zoom, anchor: .topLeading)
+                            // Slides the picture left and up by the share of its overhang that `focus` asks for.
+                            .alignmentGuide(.leading) { ($0.width * sponsor.zoom - geo.size.width) * sponsor.focus.x }
+                            .alignmentGuide(.top) { ($0.height * sponsor.zoom - geo.size.height) * sponsor.focus.y }
+                            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                            .clipped()
+                            .overlay {
+                                LinearGradient(colors: [.black.opacity(0.15), .black.opacity(0.2), .black.opacity(0.65)],
+                                               startPoint: .top, endPoint: .bottom)
+                            }
+                    } else {
+                        sponsor.gradient
+                    }
+                }
+            }
+        } else {
+            ZStack {
+                sponsor.gradient
+                CardDecoration(symbol: sponsor.symbol, symbolSize: symbolSize)
+                    .opacity(decorationOpacity)
+            }
+        }
     }
 }
 
@@ -186,7 +237,7 @@ struct SponsorChallengeCard: View {
                     Text(unlocked ? "Get offer" : "Keep walking to unlock")
                         .font(.subheadline.weight(.bold))
                 }
-                .foregroundStyle(unlocked ? Color(hex: sponsor.colors[0]) : .white)
+                .foregroundStyle(unlocked ? (sponsor.image == nil ? Color(hex: sponsor.colors[0]) : .black) : .white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
                 .background(unlocked ? AnyShapeStyle(.white) : AnyShapeStyle(.white.opacity(0.2)), in: Capsule())
@@ -198,14 +249,9 @@ struct SponsorChallengeCard: View {
         .foregroundStyle(.white)
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background {
-            ZStack {
-                sponsor.gradient
-                CardDecoration(symbol: sponsor.symbol, symbolSize: 92)
-            }
-        }
+        .background { SponsorBackground(sponsor: sponsor, symbolSize: 92) }
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: Color(hex: sponsor.colors[0]).opacity(0.35), radius: 16, y: 8)
+        .shadow(color: (sponsor.image == nil ? Color(hex: sponsor.colors[0]) : .black).opacity(sponsor.image == nil ? 0.35 : 0.2), radius: 16, y: 8)
     }
 }
 
@@ -218,10 +264,13 @@ struct SponsorOfferCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
-                Image(systemName: sponsor.symbol)
-                    .font(.system(size: 17, weight: .bold))
-                    .frame(width: 38, height: 38)
-                    .background(.white.opacity(0.22), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                // The picture says what it is; the icon is for cards without one.
+                if sponsor.image == nil {
+                    Image(systemName: sponsor.symbol)
+                        .font(.system(size: 17, weight: .bold))
+                        .frame(width: 38, height: 38)
+                        .background(.white.opacity(0.22), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                }
                 Spacer()
                 SponsoredTag()
             }
@@ -244,13 +293,7 @@ struct SponsorOfferCard: View {
         .foregroundStyle(.white)
         .padding(14)
         .frame(width: 230, height: 168, alignment: .topLeading)
-        .background {
-            ZStack {
-                sponsor.gradient
-                CardDecoration(symbol: sponsor.symbol, symbolSize: 56)
-                    .opacity(0.6)
-            }
-        }
+        .background { SponsorBackground(sponsor: sponsor, symbolSize: 56, decorationOpacity: 0.6) }
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
