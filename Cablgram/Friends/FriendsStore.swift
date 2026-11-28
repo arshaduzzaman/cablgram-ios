@@ -28,6 +28,8 @@ struct FriendWalker: Equatable {
     let spentSteps: Int
     /// Steps their claims have used.
     var rewardSpent = 0
+    /// Steps they have to use, as the server last worked it out.
+    var available: Int? = nil
     /// The id of the reward they're aiming for, if any.
     let goal: String?
     let updatedAt: Date?
@@ -35,7 +37,7 @@ struct FriendWalker: Equatable {
     /// Steps this week, or 0 when they haven't synced this week.
     var stepsThisWeek: Int { week == LeaderboardStore.weekKey ? weekSteps : 0 }
     /// Steps they can still spend on rewards.
-    var availableSteps: Int { max(totalSteps - spentSteps - rewardSpent, 0) }
+    var availableSteps: Int { available ?? max(totalSteps - spentSteps - rewardSpent, 0) }
     @MainActor var goalReward: Reward? {
         goal.flatMap { id in Reward.all.first { $0.id == id } ?? RewardStore.shared.timed.first { $0.id == id } }
     }
@@ -144,6 +146,7 @@ final class FriendsStore: ObservableObject {
                         week: data["week"] as? String ?? "",
                         spentSteps: (data["spentSteps"] as? NSNumber)?.intValue ?? 0,
                         rewardSpent: (data["rewardSpent"] as? NSNumber)?.intValue ?? 0,
+                        available: (data["available"] as? NSNumber)?.intValue,
                         goal: data["goal"] as? String,
                         updatedAt: (data["updatedAt"] as? Timestamp)?.dateValue())
                     Task { @MainActor in

@@ -28,12 +28,12 @@ final class StepStore: ObservableObject {
     @Published private(set) var hasLoaded = false
     /// The reward the user picked to aim for. `nil` means "the next one".
     @Published private(set) var goalRewardID: String?
-    /// Steps spent on eggs and headlines. They come off what counts toward
-    /// rewards, but never off the leaderboard (that's what you walked).
+    /// Steps spent on headlines, as the server last had it. They come off what counts
+    /// toward rewards, but never off the leaderboard (that's what you walked).
     @Published private(set) var spentSteps: Int
-    /// The same spending by Bangladesh day ("yyyy-MM-dd"), newest 45 days. Steps spent on a
-    /// day don't count toward limited-time rewards for that day.
-    @Published private(set) var spentDays: [String: Int]
+    /// Your own `walkers` record: the server's count of your steps to use and your progress
+    /// toward each reward. Nil when signed out or before it loads.
+    @Published private(set) var server: LeaderboardEntry?
 
     private let health = HKHealthStore()
     private let stepType = HKQuantityType(.stepCount)
@@ -69,7 +69,7 @@ final class StepStore: ObservableObject {
         }
         goalRewardID = defaults.string(forKey: "walk.goalReward")
         spentSteps = defaults.integer(forKey: "walk.spentSteps")
-        spentDays = defaults.dictionary(forKey: "walk.spentDays") as? [String: Int] ?? [:]
+        defaults.removeObject(forKey: "walk.spentDays") // the server keeps these now
         // Claims used to be kept only on the phone; they're on the server now.
         defaults.removeObject(forKey: "walk.claimed")
         #if DEBUG
@@ -133,44 +133,42 @@ final class StepStore: ObservableObject {
         }
     }
 
-    /// Steps per day for timed rewards' progress (the server counts for itself before a claim).
-    var rewardDays: [String: Int] {
-        #if DEBUG
-        // Test steps count as walked today, so timed rewards can be tried in the Simulator.
-        var days = dailySteps
-        days[HealthDays.key(for: .now), default: 0] += testSteps
-        return days
-        #else
-        return dailySteps
-        #endif
+    /// Takes your record from the server (nil when signed out).
+    func setServer(_ entry: LeaderboardEntry?) {
+        server = entry
+        guard let entry, entry.spentSteps != spentSteps else { return }
+        spentSteps = entry.spentSteps
+        defaults.set(spentSteps, forKey: "walk.spentSteps")
     }
+
+    /// Steps this phone has counted since the server last worked out your record.
+    private var sinceServer: Int { server.map { max(totalSteps - $0.totalSteps, 0) } ?? 0 }
 
     /// Steps your claims have used (a rejected claim gives them back), from your own claims.
     var rewardSpent: Int {
         RewardStore.shared.claims.values.filter { $0.status != .rejected }.reduce(0) { $0 + $1.stepsSpent }
     }
 
-    /// Steps left to use on each day: walked, minus what was spent that day on eggs,
-    /// headlines and limited-time rewards. The server counts the same way before a claim.
-    var netRewardDays: [String: Int] {
-        var used = spentDays
-        for claim in RewardStore.shared.claims.values where claim.status != .rejected {
-            for (day, steps) in claim.spentDays { used[day, default: 0] += steps }
-        }
-        return rewardDays.reduce(into: [:]) { $0[$1.key] = max($1.value - (used[$1.key] ?? 0), 0) }
+    /// Steps you have to use: walked minus spent (on headlines and rewards claimed). The
+    /// server's count plus the steps since; before it has one, worked out here.
+    var availableSteps: Int {
+        if let counted = server?.available { return counted + sinceServer }
+        return max(totalSteps - spentSteps - rewardSpent, 0)
     }
-
-    /// Steps you have to use: walked minus spent (on eggs, headlines and rewards claimed).
-    var availableSteps: Int { max(totalSteps - spentSteps - rewardSpent, 0) }
 
     /// How far you are toward `reward`: your steps to use for an ordinary one; for a
     /// limited-time one, steps (or days) in its period. `missed` means it's out of reach.
+    /// The server works it out (cablgram-admin lib/progress.ts); steps walked since are added.
     func progress(toward reward: Reward) -> (done: Int, need: Int, missed: Bool) {
+        if let got = server?.progress[reward.claimKey] {
+            if got.countsDays { return (got.done, got.need, got.missed) }
+            // A period that's over gets nothing from today's steps.
+            let running = reward.span.map { $0.end >= RewardDays.key(.now) } ?? true
+            return (min(got.done + (running ? sinceServer : 0), got.need), got.need, false)
+        }
+        // The server hasn't counted this one yet (a period that just began, or not signed in).
         guard let schedule = reward.schedule else { return (min(availableSteps, reward.steps), reward.steps, false) }
-        var got = reward.progress(days: netRewardDays)
-        // The steps also have to be there to use.
-        if !schedule.everyDay { got.done = min(got.done, availableSteps) }
-        return got
+        return (0, schedule.everyDay ? reward.span.map(RewardDays.count) ?? 1 : reward.steps, false)
     }
 
     /// A limited-time reward with the period that's running today, or nil when it isn't running.
@@ -179,26 +177,6 @@ final class StepStore: ObservableObject {
               let span = reward.schedule?.span(on: RewardDays.key(now)) else { return nil }
         reward.span = span
         return reward
-    }
-
-    /// Spends steps if you have enough. Returns whether it worked.
-    func spend(_ amount: Int) -> Bool {
-        guard amount > 0, availableSteps >= amount else { return false }
-        spentSteps += amount
-        defaults.set(spentSteps, forKey: "walk.spentSteps")
-        let today = RewardDays.key(.now), oldest = RewardDays.add(-45, to: today)
-        spentDays[today, default: 0] += amount
-        spentDays = spentDays.filter { $0.key >= oldest }
-        defaults.set(spentDays, forKey: "walk.spentDays")
-        return true
-    }
-
-    /// Takes the spent total saved in the cloud if it's higher (e.g. after
-    /// reinstalling, or spending on another phone).
-    func adoptSpentSteps(_ cloud: Int) {
-        guard cloud > spentSteps else { return }
-        spentSteps = cloud
-        defaults.set(spentSteps, forKey: "walk.spentSteps")
     }
 
     var unlockedCount: Int {
@@ -218,14 +196,10 @@ final class StepStore: ObservableObject {
     /// Steps still needed for the goal reward (0 when it's unlocked).
     var stepsToGoal: Int {
         guard let goal = goalReward else { return 0 }
-        if goal.schedule?.everyDay == true {
-            // Day by day: what's left of today's target.
-            let got = progress(toward: goal)
-            if got.done >= got.need { return 0 }
-            return max(goal.steps - (netRewardDays[RewardDays.key(.now)] ?? 0), 0)
-        }
+        // Day by day for an every-day reward: what's left of today's target.
+        if let got = server?.progress[goal.claimKey] { return max(got.left - sinceServer, 0) }
         let got = progress(toward: goal)
-        return max(got.need - got.done, 0)
+        return goal.schedule?.everyDay == true ? goal.steps : max(got.need - got.done, 0)
     }
 
     func setGoal(_ reward: Reward) {
@@ -459,11 +433,7 @@ final class StepStore: ObservableObject {
 
     func resetTestProgress() {
         testSteps = 0
-        spentSteps = 0
-        spentDays = [:]
         defaults.set(0, forKey: "walk.testSteps")
-        defaults.set(0, forKey: "walk.spentSteps")
-        defaults.removeObject(forKey: "walk.spentDays")
     }
     #endif
 }

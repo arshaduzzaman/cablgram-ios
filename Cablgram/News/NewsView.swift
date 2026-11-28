@@ -56,14 +56,13 @@ struct NewsView: View {
                             myName: auth.displayName,
                             myPhotoURL: auth.user?.photoURL,
                             availableSteps: steps.availableSteps,
-                            spend: { amount in steps.spend(amount) },
                             showsThrowTip: !eggTipDone && post.id == feed.posts.first?.id,
                             onThrowEgg: { spot in
                                 eggTipDone = true
                                 return social.throwEgg(at: spot, on: post.id)
                             },
                             onHeadline: { text, amount in
-                                social.postHeadline(text, steps: amount, by: auth.displayName, on: post.id)
+                                await social.postHeadline(text, steps: amount, by: auth.displayName, on: post.id)
                             })
                         .equatable()
                         .hairline()
@@ -367,12 +366,11 @@ private struct PostRow: View, Equatable {
     let myName: String
     let myPhotoURL: URL?
     let availableSteps: Int
-    /// Spends steps; returns whether there were enough.
-    let spend: (Int) -> Bool
     /// Shows how to throw an egg over the photo (the first post, until your first throw).
     let showsThrowTip: Bool
     let onThrowEgg: (CGPoint) -> String
-    let onHeadline: (String, Int) -> Void
+    /// Posts a headline for that many steps. Returns nil when it's up, or why it isn't.
+    let onHeadline: (String, Int) async -> String?
 
     @State private var image: UIImage?
     @State private var loadFailed = false
@@ -439,10 +437,9 @@ private struct PostRow: View, Equatable {
         .onChange(of: eggs.map(\.id), initial: true) { _, ids in noticeNewEggs(ids) }
         .sheet(isPresented: $showHeadlines) {
             HeadlineSheet(headlines: headlines, availableSteps: availableSteps) { text, steps in
-                guard spend(steps) else { return false }
-                onHeadline(text, steps)
-                Haptics.celebrate()
-                return true
+                let problem = await onHeadline(text, steps)
+                if problem == nil { Haptics.celebrate() }
+                return problem
             }
             .presentationDetents([.medium, .large])
         }
@@ -964,12 +961,14 @@ private struct PostRow: View, Equatable {
 private struct HeadlineSheet: View {
     let headlines: [Headline]
     let availableSteps: Int
-    /// Returns whether it went through (enough steps).
-    let onPost: (String, Int) -> Bool
+    /// Returns nil when it went through, or a sentence saying why not.
+    let onPost: (String, Int) async -> String?
 
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var amount = 0
+    @State private var posting = false
+    @State private var problem: String?
     @FocusState private var typing: Bool
 
     /// The least it takes to go on top.
@@ -1018,18 +1017,36 @@ private struct HeadlineSheet: View {
                     }
 
                     Button {
-                        guard canPost else { return }
-                        if onPost(trimmed, amount) { dismiss() }
+                        guard canPost, !posting else { return }
+                        posting = true
+                        problem = nil
+                        Task {
+                            problem = await onPost(trimmed, amount)
+                            posting = false
+                            if problem == nil { dismiss() }
+                        }
                     } label: {
-                        Text(canAfford ? "Spend \(amount.formatted()) steps" : "Not enough steps")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 52)
-                            .background(canPost ? Color.brand : Color.brand.opacity(0.4), in: Capsule())
+                        Group {
+                            if posting {
+                                ProgressView().tint(.white)
+                            } else {
+                                Text(canAfford ? "Spend \(amount.formatted()) steps" : "Not enough steps")
+                            }
+                        }
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(canPost ? Color.brand : Color.brand.opacity(0.4), in: Capsule())
                     }
                     .buttonStyle(.plain)
-                    .disabled(!canPost)
+                    .disabled(!canPost || posting)
+
+                    if let problem {
+                        Text(problem)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
 
                     Text("Spent steps come off your reward progress. Your walked total on the leaderboard stays the same.")
                         .font(.caption)

@@ -352,16 +352,11 @@ private struct StepSync: View {
         .onChange(of: steps.stepsSinceJoining) { _, _ in sync() }
         .onChange(of: steps.localWeek) { _, _ in sync() }
         .onChange(of: steps.dailySteps) { _, _ in sync() }
-        .onChange(of: steps.spentSteps) { _, _ in sync() }
         .onChange(of: steps.goalReward?.id) { _, _ in sync() }
         .onChange(of: steps.hasLoaded) { _, _ in sync() }
         .onChange(of: steps.totalSteps) { _, _ in showYourSteps() }
         .onChange(of: steps.stepsThisWeek) { _, _ in showYourSteps() }
-        .onChange(of: leaderboard.entries) { _, entries in
-            if let mine = entries.first(where: { $0.id == auth.user?.uid }) {
-                steps.adoptSpentSteps(mine.spentSteps)
-            }
-        }
+        .onChange(of: leaderboard.mine, initial: true) { _, mine in steps.setServer(mine) }
     }
 
     /// Uploads (when anything changed) and refreshes your own leaderboard row.

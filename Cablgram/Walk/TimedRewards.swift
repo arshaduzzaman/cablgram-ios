@@ -98,21 +98,6 @@ enum RewardDays {
 }
 
 extension Reward {
-    /// How far you are in this reward's period, from the steps this phone counted per day.
-    /// Counting in total, `done` and `need` are steps; counting every day, they're days.
-    func progress(days: [String: Int], today: String = RewardDays.key(.now)) -> (done: Int, need: Int, missed: Bool) {
-        guard let span, let schedule else { return (0, steps, false) }
-        var total = 0, daysDone = 0, missed = false
-        var day = span.start
-        while day <= span.end, day <= today {
-            let walked = days[day] ?? 0
-            total += walked
-            if walked >= steps { daysDone += 1 } else if day < today { missed = true }
-            day = RewardDays.add(1, to: day)
-        }
-        return schedule.everyDay ? (daysDone, RewardDays.count(span), missed) : (total, steps, false)
-    }
-
     /// "Today", "Yesterday", "This week", "Last week" or the dates.
     func periodName(at now: Date = .now) -> String {
         guard let span, let schedule else { return "" }

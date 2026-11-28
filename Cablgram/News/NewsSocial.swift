@@ -150,21 +150,28 @@ final class NewsSocial: ObservableObject {
         return egg.id
     }
 
-    /// Puts up a headline paid for with `steps` (already spent by the caller).
-    func postHeadline(_ text: String, steps: Int, by author: String, on postID: String) {
-        let line = Headline(id: UUID().uuidString, text: text, author: author, steps: steps, uid: uid)
-        guard let uid else {
-            headlines[postID, default: []].append(line)
+    /// Puts up a headline paid for with `steps`. The server checks the price and your steps,
+    /// takes them and saves the headline (cablgram-admin /api/news/headline). Returns nil when
+    /// it's up, or a sentence saying why not.
+    func postHeadline(_ text: String, steps: Int, by author: String, on postID: String) async -> String? {
+        guard uid != nil, let user = Auth.auth().currentUser else {
+            // Not signed in (test builds): it only shows on this phone.
+            headlines[postID, default: []].append(Headline(id: UUID().uuidString, text: text, author: author, steps: steps, uid: nil))
             headlines[postID]?.sort { $0.steps > $1.steps }
-            return
+            return nil
         }
-        post(postID).collection("headlines").document(line.id).setData([
-            "uid": uid,
-            "author": author,
-            "text": text,
-            "steps": steps,
-            "at": FieldValue.serverTimestamp(),
-        ], completion: report("headline"))
+        guard let token = try? await user.getIDToken() else { return "Sign in again." }
+        var request = URLRequest(url: Backend.url("/api/news/headline"), timeoutInterval: 20)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["postId": postID, "text": text, "steps": steps])
+        guard let (data, response) = try? await URLSession.shared.data(for: request) else {
+            return "Couldn't reach Cablgram. Check your connection and try again."
+        }
+        if (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0) { return nil }
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        return json?["error"] as? String ?? "Something went wrong. Try again."
     }
 
     /// Turns a failed save into a message on screen (and in the log).

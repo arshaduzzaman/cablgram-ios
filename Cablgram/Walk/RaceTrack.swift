@@ -25,11 +25,7 @@ struct RaceTrack: View {
 
     private var racers: [Racer] {
         let name = auth.user?.displayName ?? "You"
-        if goal.schedule != nil {
-            return leaderboard.race(forTimed: goal, yours: yours, uid: auth.user?.uid, name: name, photoURL: auth.user?.photoURL)
-        }
-        return leaderboard.race(for: goal, yourSteps: steps.availableSteps, uid: auth.user?.uid,
-                                name: name, photoURL: auth.user?.photoURL)
+        return leaderboard.race(for: goal, yours: yours, uid: auth.user?.uid, name: name, photoURL: auth.user?.photoURL)
     }
 
     var body: some View {

@@ -31,8 +31,8 @@ struct GoalHero: View {
             HStack {
                 Text("This week **\(steps.stepsThisWeek.formatted())** steps")
                 Spacer()
-                Text(steps.spentSteps + steps.rewardSpent > 0
-                     ? "Walked **\(steps.totalSteps.formatted())** · spent \((steps.spentSteps + steps.rewardSpent).formatted())"
+                Text(steps.totalSteps > steps.availableSteps
+                     ? "Walked **\(steps.totalSteps.formatted())** · spent \((steps.totalSteps - steps.availableSteps).formatted())"
                      : "Total **\(steps.totalSteps.formatted())**")
             }
             .font(.footnote)

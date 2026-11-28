@@ -19,12 +19,36 @@ struct LeaderboardEntry: Identifiable, Equatable {
     var updatedAt: Date? = nil
     /// Steps their claims have used (the server's count).
     var rewardSpent: Int = 0
-    /// Steps left to use on each day ("yyyy-MM-dd"): the server's count minus what they spent
-    /// that day. For races to limited-time rewards.
-    var stepDays: [String: Int] = [:]
+    /// Steps they have to use, as the server last worked it out (nil until it has).
+    var available: Int? = nil
+    /// How far they are toward each reward, by `Reward.claimKey`, worked out by the server.
+    var progress: [String: RewardProgress] = [:]
 
     /// Steps they have to use: walked minus spent.
-    var availableSteps: Int { max(totalSteps - spentSteps - rewardSpent, 0) }
+    var availableSteps: Int { available ?? max(totalSteps - spentSteps - rewardSpent, 0) }
+}
+
+/// How far someone is toward one reward (one period of it, for a limited-time reward), as the
+/// server worked it out and saved it on their `walkers` record (cablgram-admin lib/progress.ts).
+/// The app only shows and sorts these, so how steps count can change without an app update.
+struct RewardProgress: Equatable {
+    /// Steps, or days when `countsDays` (a reward that needs its steps every day).
+    let done: Int
+    let need: Int
+    /// Steps still to walk (today's, for an every-day reward).
+    let left: Int
+    var countsDays = false
+    /// A day was missed, so it's out of reach.
+    var missed = false
+
+    init?(_ value: Any?) {
+        guard let x = value as? [String: Any], let need = (x["need"] as? NSNumber)?.intValue else { return nil }
+        done = (x["done"] as? NSNumber)?.intValue ?? 0
+        self.need = need
+        left = (x["left"] as? NSNumber)?.intValue ?? max(need - done, 0)
+        countsDays = x["days"] as? Bool ?? false
+        missed = x["missed"] as? Bool ?? false
+    }
 }
 
 /// Someone in the race to your goal reward, and how far along they are.
@@ -56,7 +80,12 @@ final class LeaderboardStore: ObservableObject {
     /// row doesn't lag behind the number on the Walk page.
     @Published private(set) var yours: (uid: String, total: Int, week: Int)?
 
+    /// Your own record, live (you may not be in the top 100 the board listens to): your
+    /// spent steps and your progress toward each reward, as the server has them.
+    @Published private(set) var mine: LeaderboardEntry?
+
     private var listener: ListenerRegistration?
+    private var mineListener: ListenerRegistration?
     private var lastUploaded: Upload?
     /// When steps were last sent, and a send waiting for the gap to pass.
     private var lastSent = Date.distantPast
@@ -70,8 +99,6 @@ final class LeaderboardStore: ObservableObject {
         let uid: String
         let localTotal: Int
         let localWeek: Int
-        let spent: Int
-        let spentDays: [String: Int]
         /// The goal reward's id, so friends see what you're going for.
         let goal: String?
         let days: [String: Int]?
@@ -113,55 +140,58 @@ final class LeaderboardStore: ObservableObject {
         return formatter.string(from: .now)
     }
 
-    /// A walker's steps left to use on each day: walked minus spent that day.
-    nonisolated private static func netDays(_ data: [String: Any]) -> [String: Int] {
-        let walked = data["stepDays"] as? [String: NSNumber] ?? [:]
-        let spent = [data["spentDays"], data["rewardSpentDays"]].compactMap { $0 as? [String: NSNumber] }
-        return walked.reduce(into: [:]) { days, day in
-            let used = spent.reduce(0) { $0 + ($1[day.key]?.intValue ?? 0) }
-            days[day.key] = max(day.value.intValue - used, 0)
-        }
+    /// One `walkers/{uid}` record as the app uses it.
+    nonisolated private static func entry(_ id: String, _ data: [String: Any]) -> LeaderboardEntry {
+        LeaderboardEntry(
+            id: id,
+            name: data["name"] as? String ?? "Walker",
+            photoURL: (data["photoURL"] as? String).flatMap(URL.init(string:)),
+            totalSteps: (data["totalSteps"] as? NSNumber)?.intValue ?? 0,
+            weekSteps: (data["weekSteps"] as? NSNumber)?.intValue ?? 0,
+            week: data["week"] as? String ?? "",
+            spentSteps: (data["spentSteps"] as? NSNumber)?.intValue ?? 0,
+            test: data["test"] as? Bool ?? false,
+            // When their phone last sent steps: the server's note or the app's own write, whichever is newer.
+            updatedAt: [data["stepsAt"], data["updatedAt"]].compactMap { ($0 as? Timestamp)?.dateValue() }.max(),
+            rewardSpent: (data["rewardSpent"] as? NSNumber)?.intValue ?? 0,
+            available: (data["available"] as? NSNumber)?.intValue,
+            progress: (data["progress"] as? [String: Any] ?? [:]).compactMapValues(RewardProgress.init)
+        )
     }
 
     func startListening() {
-        guard AuthStore.isConfigured, listener == nil, Auth.auth().currentUser != nil else { return }
-        listener = Firestore.firestore()
-            .collection("walkers")
+        guard AuthStore.isConfigured, listener == nil, let uid = Auth.auth().currentUser?.uid else { return }
+        let walkers = Firestore.firestore().collection("walkers")
+        listener = walkers
             .order(by: "totalSteps", descending: true)
             .limit(to: 100)
             .addSnapshotListener { [weak self] snapshot, error in
-                let entries = snapshot?.documents.map { doc in
-                    let data = doc.data()
-                    return LeaderboardEntry(
-                        id: doc.documentID,
-                        name: data["name"] as? String ?? "Walker",
-                        photoURL: (data["photoURL"] as? String).flatMap(URL.init(string:)),
-                        totalSteps: (data["totalSteps"] as? NSNumber)?.intValue ?? 0,
-                        weekSteps: (data["weekSteps"] as? NSNumber)?.intValue ?? 0,
-                        week: data["week"] as? String ?? "",
-                        spentSteps: (data["spentSteps"] as? NSNumber)?.intValue ?? 0,
-                        test: data["test"] as? Bool ?? false,
-                        // When their phone last sent steps: the server's note or the app's own write, whichever is newer.
-                        updatedAt: [data["stepsAt"], data["updatedAt"]].compactMap { ($0 as? Timestamp)?.dateValue() }.max(),
-                        rewardSpent: (data["rewardSpent"] as? NSNumber)?.intValue ?? 0,
-                        stepDays: Self.netDays(data)
-                    )
-                }
+                let entries = snapshot?.documents.map { Self.entry($0.documentID, $0.data()) }
                 let message = error?.localizedDescription
                 Task { @MainActor in
                     if let entries { self?.entries = entries }
                     self?.errorMessage = message
                 }
             }
+        mineListener = walkers.document(uid).addSnapshotListener { [weak self] snapshot, _ in
+            guard let snapshot else { return }
+            let mine = snapshot.data().map { Self.entry(uid, $0) }
+            Task { @MainActor in
+                if self?.mine != mine { self?.mine = mine }
+            }
+        }
     }
 
     func stopListening() {
         listener?.remove()
         listener = nil
+        mineListener?.remove()
+        mineListener = nil
         entries = []
+        mine = nil
     }
 
-    /// Saves the signed-in user's name, spent steps, goal reward and this phone's Health days,
+    /// Saves the signed-in user's name, goal reward and this phone's Health days,
     /// then asks the server to recalculate. Skips it all when nothing changed.
     /// The server's answer goes back to `steps`; failures are ignored (the
     /// server also recalculates everyone daily).
@@ -194,7 +224,7 @@ final class LeaderboardStore: ObservableObject {
         // Until Health has answered there are no real days to send.
         let days = steps.access == .ready && steps.hasLoaded ? steps.dailySteps : nil
         let upload = Upload(uid: user.uid, localTotal: steps.stepsSinceJoining, localWeek: steps.localWeek,
-                            spent: steps.spentSteps, spentDays: steps.spentDays, goal: steps.goalReward?.id, days: days)
+                            goal: steps.goalReward?.id, days: days)
         if upload == lastUploaded {
             if days != nil { Self.checkIn() }
             return
@@ -204,13 +234,10 @@ final class LeaderboardStore: ObservableObject {
 
         var data: [String: Any] = [
             "name": user.displayName ?? "Walker",
-            "spentSteps": upload.spent,
             "goal": upload.goal.map { $0 as Any } ?? FieldValue.delete(),
             "updatedAt": FieldValue.serverTimestamp(),
         ]
         data["photoURL"] = user.photoURL?.absoluteString
-        // Left out when empty: an empty map would wipe the days saved from another phone.
-        if !upload.spentDays.isEmpty { data["spentDays"] = upload.spentDays }
         #if targetEnvironment(simulator)
         data["test"] = true // keeps Simulator runs off real people's leaderboard
         #endif
@@ -313,37 +340,23 @@ final class LeaderboardStore: ObservableObject {
     /// The leaderboard for one reward: the same race its track shows, furthest along first,
     /// leaving out people who haven't started (you always show).
     func board(for goal: Reward, steps: StepStore, uid: String?, name: String, photoURL: URL?) -> [Racer] {
-        let all = goal.schedule != nil
-            ? race(forTimed: goal, yours: steps.progress(toward: goal), uid: uid, name: name, photoURL: photoURL)
-            : race(for: goal, yourSteps: steps.availableSteps, uid: uid, name: name, photoURL: photoURL)
-        return all.filter { $0.steps > 0 || $0.isYou }
+        race(for: goal, yours: steps.progress(toward: goal), uid: uid, name: name, photoURL: photoURL)
+            .filter { $0.steps > 0 || $0.isYou }
     }
 
-    /// Everyone racing to `goal`, closest to it first, by total steps.
-    func race(for goal: Reward, yourSteps: Int, uid: String?, name: String, photoURL: URL?) -> [Racer] {
-        var racers = ranked
-            .filter { $0.id != uid }
-            .map { Racer(id: $0.id, name: $0.name, photoURL: $0.photoURL,
-                         steps: min($0.availableSteps, goal.steps), isYou: false,
-                         finished: $0.availableSteps >= goal.steps, updatedAt: $0.updatedAt) }
-        racers.append(Racer(id: uid ?? "you", name: name, photoURL: photoURL,
-                            steps: min(yourSteps, goal.steps), isYou: true,
-                            finished: yourSteps >= goal.steps))
-        return racers.sorted { $0.steps > $1.steps }
-    }
-
-    /// The race to a limited-time reward: how far everyone is in its period (steps, or days
-    /// for an every-day reward). Yours comes from this phone, everyone else's from the server.
-    func race(forTimed reward: Reward, yours: (done: Int, need: Int, missed: Bool), uid: String?, name: String,
-              photoURL: URL?, today: String = RewardDays.key(.now)) -> [Racer] {
+    /// Everyone racing to `goal`, closest to it first: steps, or days for an every-day reward.
+    /// Everyone else's progress is the server's; yours also has the steps since it last counted.
+    func race(for goal: Reward, yours: (done: Int, need: Int, missed: Bool), uid: String?, name: String,
+              photoURL: URL?) -> [Racer] {
         var racers = ranked
             .filter { $0.id != uid }
             .map { entry -> Racer in
-                var got = reward.progress(days: entry.stepDays, today: today)
-                if reward.schedule?.everyDay != true { got.done = min(got.done, entry.availableSteps) }
+                var done = entry.progress[goal.claimKey]?.done
+                // Before the server has worked theirs out: an ordinary reward is just their steps to use.
+                if done == nil, goal.schedule == nil { done = entry.availableSteps }
+                let steps = min(done ?? 0, yours.need)
                 return Racer(id: entry.id, name: entry.name, photoURL: entry.photoURL,
-                             steps: min(got.done, got.need), isYou: false,
-                             finished: got.done >= got.need, updatedAt: entry.updatedAt)
+                             steps: steps, isYou: false, finished: steps >= yours.need, updatedAt: entry.updatedAt)
             }
         racers.append(Racer(id: uid ?? "you", name: name, photoURL: photoURL,
                             steps: min(yours.done, yours.need), isYou: true,
